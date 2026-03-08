@@ -1284,8 +1284,8 @@ button {
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
+  gap: 14px;
+  padding: 18px 18px 14px;
   border-radius: 22px;
   border: 1px solid rgba(205, 211, 223, 0.96);
   background: rgba(255, 255, 255, 0.97);
@@ -1295,7 +1295,7 @@ button {
 
 .generator-prompt-dock textarea {
   width: 100%;
-  min-height: 132px;
+  min-height: 128px;
   resize: vertical;
   border: 0;
   outline: none;
@@ -1310,40 +1310,65 @@ button {
   color: #b1b8c5;
 }
 
+.generator-prompt-dock textarea:disabled {
+  color: #7f8ba1;
+  cursor: not-allowed;
+}
+
 .generator-prompt-footer {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.generator-prompt-toolbar {
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
-.generator-prompt-meta {
+.generator-prompt-field {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
-.generator-prompt-model {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #2f3a52;
+.generator-prompt-field--model {
+  flex: 1 1 260px;
+}
+
+.generator-prompt-field--ratio {
+  flex: 0 0 108px;
+}
+
+.generator-prompt-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a879d;
 }
 
 .generator-prompt-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 1 1 320px;
+  flex-wrap: wrap;
 }
 
-.generator-prompt-actions select,
-.generator-prompt-actions button {
+.generator-prompt-field select,
+.generator-prompt-actions > button {
   border-radius: 12px;
   font: inherit;
 }
 
-.generator-prompt-actions select {
+.generator-prompt-field select {
+  min-height: 42px;
   border: 1px solid #c8d5eb;
   background: #fff;
   color: #273a5f;
@@ -1351,15 +1376,59 @@ button {
   outline: none;
 }
 
-.generator-prompt-actions button {
+.generator-prompt-field select:focus {
+  border-color: #5a7fbf;
+  box-shadow: 0 0 0 3px rgba(80, 122, 194, 0.15);
+}
+
+.generator-prompt-field select:disabled {
+  background: #f5f7fb;
+  color: #8e98ac;
+}
+
+.generator-size-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #d6ddea;
+  border-radius: 14px;
+  background: #f6f8fb;
+}
+
+.generator-size-group button {
+  min-height: 34px;
+  min-width: 52px;
   border: 0;
-  padding: 10px 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: transparent;
+  color: #50607b;
+  font: inherit;
+  font-weight: 700;
+}
+
+.generator-size-group button.is-active {
+  background: #fff;
+  color: #2557d6;
+  box-shadow: 0 2px 8px rgba(42, 78, 149, 0.12);
+}
+
+.generator-size-group button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.generator-prompt-actions > button {
+  min-height: 42px;
+  border: 0;
+  padding: 10px 16px;
   color: #fff;
   font-weight: 700;
   background: linear-gradient(135deg, #0b8a6a 0%, #0ea679 100%);
 }
 
-.generator-prompt-actions button[disabled] {
+.generator-prompt-actions > button[disabled] {
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -1377,6 +1446,12 @@ button {
 
 .generator-prompt-status.is-error {
   color: #c13636;
+}
+
+@media (max-width: 960px) {
+  .generator-prompt-dock {
+    width: min(640px, calc(100vw - 32px)) !important;
+  }
 }
 
 .canvas-workbench-sidebar {
@@ -1881,18 +1956,29 @@ button {
     max-width: calc(100vw - 32px);
   }
 
-  .generator-prompt-footer {
+  .generator-prompt-toolbar {
     flex-direction: column;
     align-items: stretch;
   }
 
+  .generator-prompt-footer,
   .generator-prompt-actions {
     width: 100%;
-    flex-wrap: wrap;
+    justify-content: stretch;
   }
 
-  .generator-prompt-actions select,
-  .generator-prompt-actions button {
+  .generator-prompt-field,
+  .generator-prompt-field--ratio {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .generator-size-group {
+    width: 100%;
+  }
+
+  .generator-size-group button,
+  .generator-prompt-actions > button {
     flex: 1;
   }
 

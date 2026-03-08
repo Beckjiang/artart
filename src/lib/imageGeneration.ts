@@ -13,11 +13,49 @@ export const IMAGE_ASPECT_RATIOS = [
 
 export type ImageAspectRatio = (typeof IMAGE_ASPECT_RATIOS)[number]
 
+export const IMAGE_GENERATOR_MODELS = [
+  'gemini-3-pro-image-preview',
+  'gemini-3.1-flash-image-preview',
+] as const
+
+export type ImageGeneratorModel = (typeof IMAGE_GENERATOR_MODELS)[number]
+
+export const IMAGE_GENERATION_SIZES = ['1K', '2K', '4K'] as const
+
+export type ImageGenerationSize = (typeof IMAGE_GENERATION_SIZES)[number]
+
+export const DEFAULT_IMAGE_GENERATOR_MODEL: ImageGeneratorModel =
+  'gemini-3.1-flash-image-preview'
+
+export const DEFAULT_IMAGE_GENERATION_SIZE: ImageGenerationSize = '2K'
+
+export const normalizeImageGeneratorModel = (imageModel?: unknown): ImageGeneratorModel => {
+  const normalized = typeof imageModel === 'string' ? imageModel.trim() : ''
+
+  if (IMAGE_GENERATOR_MODELS.includes(normalized as ImageGeneratorModel)) {
+    return normalized as ImageGeneratorModel
+  }
+
+  return DEFAULT_IMAGE_GENERATOR_MODEL
+}
+
+export const normalizeImageGenerationSize = (imageSize?: unknown): ImageGenerationSize => {
+  const normalized = typeof imageSize === 'string' ? imageSize.trim().toUpperCase() : ''
+
+  if (IMAGE_GENERATION_SIZES.includes(normalized as ImageGenerationSize)) {
+    return normalized as ImageGenerationSize
+  }
+
+  return DEFAULT_IMAGE_GENERATION_SIZE
+}
+
 export type GenerateImageParams = {
   prompt: string
   width: number
   height: number
   aspectRatio?: ImageAspectRatio
+  imageModel?: ImageGeneratorModel
+  imageSize?: ImageGenerationSize
   referenceImageUrl?: string
   referenceImageUrls?: string[]
   referenceImageMimeType?: string | null
@@ -59,8 +97,8 @@ type GeminiResponse = {
 export type GeminiConfig = {
   baseUrl: string
   apiKey: string
-  imageModel: string
-  imageSize: string
+  imageModel: ImageGeneratorModel
+  imageSize: ImageGenerationSize
 }
 
 export type GeminiRequestStyle = 'camel' | 'snake'
@@ -82,7 +120,7 @@ type GeminiEnv = {
 export type BuildGeminiRequestOptions = {
   prompt: string
   aspectRatio: ImageAspectRatio
-  imageSize: string
+  imageSize: ImageGenerationSize
   style: GeminiRequestStyle
   referenceParts?: GeminiPart[]
 }
@@ -92,8 +130,6 @@ const DIRECT_GEMINI_DEFAULT_ORIGIN = 'https://generativelanguage.googleapis.com'
 const DEV_PROXY_BASE_URL = '/api/gemini'
 const LEGACY_DEV_PROXY_BASE_URL = '/api/uniapi'
 const LEGACY_UNIAPI_BASE_URL = 'https://api.uniapi.io'
-const DEFAULT_IMAGE_MODEL = 'gemini-3.1-flash-image-preview'
-const DEFAULT_GEMINI_IMAGE_SIZE = '2K'
 const GEMINI_API_VERSION_PATH = '/v1beta'
 
 const toDataUrl = (base64: string, mimeType: string) => {
@@ -148,13 +184,14 @@ const normalizeLegacyBaseUrl = (baseUrl?: string): string | null => {
   return normalized
 }
 
-const normalizeImageSize = (imageSize?: string) => {
-  const normalized = imageSize?.trim().toUpperCase()
-  if (normalized === '1K' || normalized === '2K' || normalized === '4K') {
-    return normalized
-  }
-  return DEFAULT_GEMINI_IMAGE_SIZE
-}
+export const resolveGeminiImageDefaults = (env: GeminiEnv) => ({
+  imageModel: normalizeImageGeneratorModel(
+    readStringEnv(env.VITE_GEMINI_IMAGE_MODEL) || readStringEnv(env.VITE_UNIAPI_IMAGE_MODEL)
+  ),
+  imageSize: normalizeImageGenerationSize(
+    readStringEnv(env.VITE_GEMINI_IMAGE_SIZE) || readStringEnv(env.VITE_UNIAPI_GEMINI_IMAGE_SIZE)
+  ),
+})
 
 export const resolveGeminiConfig = (env: GeminiEnv, isDev: boolean): GeminiConfig => {
   const apiKey = readStringEnv(env.VITE_GEMINI_API_KEY) || readStringEnv(env.VITE_UNIAPI_API_KEY)
@@ -168,15 +205,7 @@ export const resolveGeminiConfig = (env: GeminiEnv, isDev: boolean): GeminiConfi
     normalizeLegacyBaseUrl(readStringEnv(env.VITE_UNIAPI_BASE_URL)) ||
     defaultBaseUrl
 
-  const imageModel =
-    readStringEnv(env.VITE_GEMINI_IMAGE_MODEL) ||
-    readStringEnv(env.VITE_UNIAPI_IMAGE_MODEL) ||
-    DEFAULT_IMAGE_MODEL
-
-  const imageSize = normalizeImageSize(
-    readStringEnv(env.VITE_GEMINI_IMAGE_SIZE) ||
-      readStringEnv(env.VITE_UNIAPI_GEMINI_IMAGE_SIZE)
-  )
+  const { imageModel, imageSize } = resolveGeminiImageDefaults(env)
 
   return {
     apiKey,
@@ -493,7 +522,7 @@ const buildGeminiRequestBody = async (
 
   return buildGeminiGenerateContentRequest({
     aspectRatio,
-    imageSize: config.imageSize,
+    imageSize: params.imageSize ?? config.imageSize,
     prompt: params.prompt,
     referenceParts,
     style,
@@ -616,7 +645,9 @@ const requestGeminiImage = async (
   params: GenerateImageParams,
   style: GeminiRequestStyle
 ): Promise<GenerateImageResult> => {
-  const endpoint = buildGeminiGenerateContentEndpoint(config.baseUrl, config.imageModel)
+  const imageModel = params.imageModel ?? config.imageModel
+  const imageSize = params.imageSize ?? config.imageSize
+  const endpoint = buildGeminiGenerateContentEndpoint(config.baseUrl, imageModel)
   const requestBody = await buildGeminiRequestBody(params, config, style)
 
   if (import.meta.env.DEV) {
@@ -624,7 +655,8 @@ const requestGeminiImage = async (
     console.info('[imageGeneration] request', {
       endpoint,
       baseUrl: config.baseUrl,
-      model: config.imageModel,
+      model: imageModel,
+      imageSize,
       style,
       aspectRatio: params.aspectRatio || pickNearestImageAspectRatio(params.width, params.height),
       authMode: isOfficialGeminiBaseUrl(config.baseUrl) ? 'x-goog-api-key' : 'bearer',

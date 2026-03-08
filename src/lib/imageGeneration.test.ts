@@ -41,6 +41,20 @@ describe('resolveGeminiConfig', () => {
     expect(config.baseUrl).toBe('/api/gemini')
     expect(config.apiKey).toBe('legacy-key')
   })
+
+  it('falls back to supported defaults when env model or size is unsupported', () => {
+    const config = resolveGeminiConfig(
+      {
+        VITE_GEMINI_API_KEY: 'test-key',
+        VITE_GEMINI_IMAGE_MODEL: 'custom-image-model',
+        VITE_GEMINI_IMAGE_SIZE: '8K',
+      },
+      true
+    )
+
+    expect(config.imageModel).toBe('gemini-3.1-flash-image-preview')
+    expect(config.imageSize).toBe('2K')
+  })
 })
 
 describe('gemini request construction', () => {
@@ -164,6 +178,104 @@ describe('network diagnostics', () => {
 })
 
 describe('generateImageFromPrompt', () => {
+  it('uses env-configured image options when request overrides are absent', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')
+    vi.stubEnv('VITE_GEMINI_IMAGE_MODEL', 'gemini-3-pro-image-preview')
+    vi.stubEnv('VITE_GEMINI_IMAGE_SIZE', '1K')
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+    })
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/models/gemini-3-pro-image-preview:generateContent'
+    )
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(requestBody.generationConfig.imageConfig.imageSize).toBe('1K')
+  })
+
+  it('prefers per-request image options over env defaults', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')
+    vi.stubEnv('VITE_GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image-preview')
+    vi.stubEnv('VITE_GEMINI_IMAGE_SIZE', '2K')
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+      imageModel: 'gemini-3-pro-image-preview',
+      imageSize: '4K',
+    })
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/models/gemini-3-pro-image-preview:generateContent'
+    )
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(requestBody.generationConfig.imageConfig.imageSize).toBe('4K')
+  })
+
   it('uses camelCase body and Bearer auth for custom gateways', async () => {
     vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
     vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')

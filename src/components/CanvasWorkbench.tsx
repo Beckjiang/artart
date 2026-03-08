@@ -23,9 +23,16 @@ import type { BoardMeta } from '../lib/boards'
 import {
   generateImageFromPrompt,
   IMAGE_ASPECT_RATIOS,
+  IMAGE_GENERATION_SIZES,
+  IMAGE_GENERATOR_MODELS,
   pickNearestImageAspectRatio,
+  resolveGeminiImageDefaults,
 } from '../lib/imageGeneration'
-import type { ImageAspectRatio } from '../lib/imageGeneration'
+import type {
+  ImageAspectRatio,
+  ImageGenerationSize,
+  ImageGeneratorModel,
+} from '../lib/imageGeneration'
 import {
   getSelectionImagineSourceImage,
   getGeneratorCardPlacement,
@@ -56,12 +63,21 @@ const MAX_TASKS = 16
 const SIDEBAR_WIDTH = 360
 const BOARD_TOUCH_DEBOUNCE = 1200
 const DEFAULT_GENERATOR_ASPECT_RATIO: ImageAspectRatio = '1:1'
+const {
+  imageModel: DEFAULT_GENERATOR_IMAGE_MODEL,
+  imageSize: DEFAULT_GENERATOR_IMAGE_SIZE,
+} = resolveGeminiImageDefaults(import.meta.env)
 const GENERATOR_ROLE = 'image-generator'
 const GENERATOR_PLACEHOLDER_LABEL = 'Image Generator'
 const GENERATED_IMAGE_ROLE = 'generated-image'
 const TASK_TARGET_REMOVED = 'TASK_TARGET_REMOVED'
 const SELECTION_IMAGINE_PROMPT = '根据图片标注信息生成图片'
 const MASK_BRUSH_SIZES = [8, 16, 24, 32] as const
+
+const IMAGE_GENERATOR_MODEL_LABELS: Record<ImageGeneratorModel, string> = {
+  'gemini-3-pro-image-preview': 'Gemini 3 Pro',
+  'gemini-3.1-flash-image-preview': 'Gemini 3.1 Flash',
+}
 
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 type GenerationTaskMaskMode = 'semantic-crop'
@@ -96,6 +112,8 @@ type GeneratorShapeMeta = {
   canvasRole: typeof GENERATOR_ROLE
   aspectRatio: ImageAspectRatio
   lastPrompt: string
+  imageModel: ImageGeneratorModel
+  imageSize: ImageGenerationSize
 }
 
 type CameraSourceSize = {
@@ -120,6 +138,8 @@ type GenerationTask = {
   origin: GenerationTaskOrigin
   prompt: string
   aspectRatio: ImageAspectRatio
+  imageModel?: ImageGeneratorModel
+  imageSize?: ImageGenerationSize
   status: TaskStatus
   error?: string
   width: number
@@ -368,29 +388,39 @@ const getGeneratorMeta = (shape: TLImageShape | null | undefined): GeneratorShap
 
   const aspectRatio = shape.meta?.aspectRatio
   const lastPrompt = shape.meta?.lastPrompt
-
-  if (typeof aspectRatio !== 'string' || !IMAGE_ASPECT_RATIOS.includes(aspectRatio as ImageAspectRatio)) {
-    return {
-      canvasRole: GENERATOR_ROLE,
-      aspectRatio: DEFAULT_GENERATOR_ASPECT_RATIO,
-      lastPrompt: typeof lastPrompt === 'string' ? lastPrompt : '',
-    }
-  }
+  const normalizedAspectRatio =
+    typeof aspectRatio === 'string' && IMAGE_ASPECT_RATIOS.includes(aspectRatio as ImageAspectRatio)
+      ? (aspectRatio as ImageAspectRatio)
+      : DEFAULT_GENERATOR_ASPECT_RATIO
 
   return {
     canvasRole: GENERATOR_ROLE,
-    aspectRatio: aspectRatio as ImageAspectRatio,
+    aspectRatio: normalizedAspectRatio,
     lastPrompt: typeof lastPrompt === 'string' ? lastPrompt : '',
+    imageModel:
+      typeof shape.meta?.imageModel === 'string' &&
+      IMAGE_GENERATOR_MODELS.includes(shape.meta.imageModel as ImageGeneratorModel)
+        ? (shape.meta.imageModel as ImageGeneratorModel)
+        : DEFAULT_GENERATOR_IMAGE_MODEL,
+    imageSize:
+      typeof shape.meta?.imageSize === 'string' &&
+      IMAGE_GENERATION_SIZES.includes(shape.meta.imageSize as ImageGenerationSize)
+        ? (shape.meta.imageSize as ImageGenerationSize)
+        : DEFAULT_GENERATOR_IMAGE_SIZE,
   }
 }
 
 const createGeneratorMeta = (
   aspectRatio: ImageAspectRatio,
-  lastPrompt = ''
+  lastPrompt = '',
+  imageModel: ImageGeneratorModel = DEFAULT_GENERATOR_IMAGE_MODEL,
+  imageSize: ImageGenerationSize = DEFAULT_GENERATOR_IMAGE_SIZE
 ): GeneratorShapeMeta => ({
   canvasRole: GENERATOR_ROLE,
   aspectRatio,
   lastPrompt,
+  imageModel,
+  imageSize,
 })
 
 const formatTaskStatus = (status: TaskStatus) => {
@@ -897,9 +927,16 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const resolvedGeneratorMeta = useMemo(() => {
     if (generatorMeta) return generatorMeta
     if (!selectedGeneratorTask) return null
-    return createGeneratorMeta(selectedGeneratorTask.aspectRatio, selectedGeneratorTask.prompt)
+    return createGeneratorMeta(
+      selectedGeneratorTask.aspectRatio,
+      selectedGeneratorTask.prompt,
+      selectedGeneratorTask.imageModel,
+      selectedGeneratorTask.imageSize
+    )
   }, [generatorMeta, selectedGeneratorTask])
   const generatorAspectRatio = resolvedGeneratorMeta?.aspectRatio ?? DEFAULT_GENERATOR_ASPECT_RATIO
+  const generatorImageModel = resolvedGeneratorMeta?.imageModel ?? DEFAULT_GENERATOR_IMAGE_MODEL
+  const generatorImageSize = resolvedGeneratorMeta?.imageSize ?? DEFAULT_GENERATOR_IMAGE_SIZE
   const activePresetDefinition = ACTION_PRESETS[activePreset]
   const canSubmitSidebarPrompt = assistantMode === 'image-edit'
   const canGenerateSidebar = canSubmitSidebarPrompt && !!sidebarPrompt.trim()
@@ -1275,7 +1312,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     if (assistantMode !== 'image-generator' || !bounds) return null
 
     const viewportPadding = 24
-    const promptWidth = Math.min(640, Math.max(360, Math.round(bounds.width * 0.8)))
+    const promptWidth = Math.min(720, Math.max(420, Math.round(bounds.width * 0.82)))
     const promptHalfWidth = promptWidth / 2
     const minPromptCenter = viewportPadding + promptHalfWidth
     const maxPromptCenter = window.innerWidth - viewportPadding - promptHalfWidth
@@ -1284,7 +1321,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       headerTop: Math.max(92, bounds.top - 28),
       headerLeft: bounds.left,
       headerWidth: bounds.width,
-      promptTop: Math.min(window.innerHeight - 220, bounds.bottom + 20),
+      promptTop: Math.min(window.innerHeight - 248, bounds.bottom + 20),
       promptLeft: Math.min(maxPromptCenter, Math.max(minPromptCenter, bounds.midX)),
       promptWidth,
     }
@@ -1826,6 +1863,26 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [updateGeneratorShapeMeta]
   )
 
+  const handleGeneratorModelChange = useCallback(
+    (imageModel: ImageGeneratorModel) => {
+      if (!selectedGeneratorImage || generatorBusy) return
+
+      updateGeneratorShapeMeta(selectedGeneratorImage.id, { imageModel })
+      setGeneratorError('')
+    },
+    [generatorBusy, selectedGeneratorImage, updateGeneratorShapeMeta]
+  )
+
+  const handleGeneratorSizeChange = useCallback(
+    (imageSize: ImageGenerationSize) => {
+      if (!selectedGeneratorImage || generatorBusy) return
+
+      updateGeneratorShapeMeta(selectedGeneratorImage.id, { imageSize })
+      setGeneratorError('')
+    },
+    [generatorBusy, selectedGeneratorImage, updateGeneratorShapeMeta]
+  )
+
   const ensureTaskTargetShape = useCallback(
     (taskId: string, task: GenerationTask) => {
       if (editor.getShape(task.targetShapeId)) {
@@ -1879,7 +1936,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       const generatorMetaPatch =
         task.origin === 'image-generator-card'
-          ? createGeneratorMeta(task.aspectRatio, task.prompt)
+          ? createGeneratorMeta(task.aspectRatio, task.prompt, task.imageModel, task.imageSize)
           : undefined
 
       updateTaskStatusPlaceholder(
@@ -1896,6 +1953,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           width: task.width,
           height: task.height,
           aspectRatio: task.aspectRatio,
+          imageModel: task.imageModel,
+          imageSize: task.imageSize,
           referenceImageUrl: task.referenceImageUrl,
           referenceImageUrls: task.referenceImageUrls,
           referenceImageMimeType: task.referenceImageMimeType,
@@ -2321,7 +2380,12 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         'Queued',
         nextWidth,
         nextHeight,
-        createGeneratorMeta(liveGeneratorMeta.aspectRatio, promptText)
+        createGeneratorMeta(
+          liveGeneratorMeta.aspectRatio,
+          promptText,
+          liveGeneratorMeta.imageModel,
+          liveGeneratorMeta.imageSize
+        )
       )
 
       const now = Date.now()
@@ -2331,6 +2395,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         origin: 'image-generator-card',
         prompt: promptText,
         aspectRatio: liveGeneratorMeta.aspectRatio,
+        imageModel: liveGeneratorMeta.imageModel,
+        imageSize: liveGeneratorMeta.imageSize,
         status: 'queued',
         width: nextWidth,
         height: nextHeight,
@@ -2501,7 +2567,12 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             current.width,
             current.height,
             current.origin === 'image-generator-card'
-              ? createGeneratorMeta(current.aspectRatio, current.prompt)
+              ? createGeneratorMeta(
+                  current.aspectRatio,
+                  current.prompt,
+                  current.imageModel,
+                  current.imageSize
+                )
               : undefined
           )
         }
@@ -2554,7 +2625,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           task.width,
           task.height,
           task.origin === 'image-generator-card'
-            ? createGeneratorMeta(task.aspectRatio, task.prompt)
+            ? createGeneratorMeta(task.aspectRatio, task.prompt, task.imageModel, task.imageSize)
             : undefined
         )
       }
@@ -2972,6 +3043,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             <textarea
               ref={generatorPromptInputRef}
               value={generatorPrompt}
+              disabled={generatorBusy}
               onChange={(event) => {
                 setGeneratorPrompt(event.target.value)
                 setGeneratorError('')
@@ -2983,42 +3055,78 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             />
 
             <div className="generator-prompt-footer">
-              <div className="generator-prompt-meta">
-                <span className="generator-prompt-model">Nano Banana Pro</span>
-              </div>
-
-              <div className="generator-prompt-actions">
-                <select
-                  value={generatorAspectRatio}
-                  disabled={generatorBusy}
-                  onChange={(event) =>
-                    selectedGeneratorImage
-                      ? resizeGeneratorCard(
-                          selectedGeneratorImage,
-                          event.target.value as ImageAspectRatio
-                        )
-                      : undefined
-                  }
-                  aria-label="选择生成卡片比例"
-                >
-                  {IMAGE_ASPECT_RATIOS.map((ratio) => (
-                    <option key={ratio} value={ratio}>
-                      {ratio}
-                    </option>
-                  ))}
-                </select>
-                {generatorBusy ? (
-                  <button
-                    type="button"
-                    className="generator-secondary-button"
-                    onClick={() => selectedGeneratorTask && handleCancelTask(selectedGeneratorTask.id)}
+              <div className="generator-prompt-toolbar">
+                <label className="generator-prompt-field generator-prompt-field--model">
+                  <span className="generator-prompt-field-label">Model</span>
+                  <select
+                    value={generatorImageModel}
+                    disabled={generatorBusy}
+                    onChange={(event) =>
+                      handleGeneratorModelChange(event.target.value as ImageGeneratorModel)
+                    }
+                    aria-label="选择生成模型"
                   >
-                    取消
-                  </button>
-                ) : null}
-                <button type="submit" disabled={!canGenerateFromCard}>
-                  {generatorBusy ? 'Generating…' : 'Generate'}
-                </button>
+                    {IMAGE_GENERATOR_MODELS.map((model) => (
+                      <option key={model} value={model}>
+                        {IMAGE_GENERATOR_MODEL_LABELS[model]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="generator-prompt-actions">
+                  <div className="generator-size-group" role="group" aria-label="选择清晰度">
+                    {IMAGE_GENERATION_SIZES.map((imageSize) => (
+                      <button
+                        key={imageSize}
+                        type="button"
+                        className={imageSize === generatorImageSize ? 'is-active' : ''}
+                        disabled={generatorBusy}
+                        aria-pressed={imageSize === generatorImageSize}
+                        onClick={() => handleGeneratorSizeChange(imageSize)}
+                      >
+                        {imageSize}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="generator-prompt-field generator-prompt-field--ratio">
+                    <span className="generator-prompt-field-label">Ratio</span>
+                    <select
+                      value={generatorAspectRatio}
+                      disabled={generatorBusy}
+                      onChange={(event) =>
+                        selectedGeneratorImage
+                          ? resizeGeneratorCard(
+                              selectedGeneratorImage,
+                              event.target.value as ImageAspectRatio
+                            )
+                          : undefined
+                      }
+                      aria-label="选择生成卡片比例"
+                    >
+                      {IMAGE_ASPECT_RATIOS.map((ratio) => (
+                        <option key={ratio} value={ratio}>
+                          {ratio}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {generatorBusy ? (
+                    <button
+                      type="button"
+                      className="generator-secondary-button"
+                      onClick={() => selectedGeneratorTask && handleCancelTask(selectedGeneratorTask.id)}
+                    >
+                      Cancel
+                    </button>
+                  ) : (
+                    <button type="submit" disabled={!canGenerateFromCard}>
+                      Generate
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
