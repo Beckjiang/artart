@@ -97,21 +97,37 @@ describe('gemini request construction', () => {
       },
     })
   })
+
+  it('sends only text prompt and aspect ratio when no reference image is provided', () => {
+    const request = buildGeminiGenerateContentRequest({
+      prompt: '生成一张极简风海报',
+      aspectRatio: '4:3',
+      imageSize: '2K',
+      style: 'camel',
+      referenceParts: [],
+    })
+
+    expect(request.contents[0].parts).toEqual([{ text: '生成一张极简风海报' }])
+    expect(request).toMatchObject({
+      generationConfig: {
+        imageConfig: {
+          aspectRatio: '4:3',
+          imageSize: '2K',
+        },
+      },
+    })
+  })
 })
 
 
 describe('request style selection', () => {
-  it('prefers snake_case for custom gateways', () => {
-    expect(getGeminiRequestStyleOrder('http://zx2.52youxi.cc:3000/v1beta')).toEqual([
-      'snake',
-      'camel',
-    ])
+  it('uses camelCase for custom gateways to match the relay doc', () => {
+    expect(getGeminiRequestStyleOrder('http://zx2.52youxi.cc:3000/v1beta')).toEqual(['camel'])
   })
 
-  it('prefers camelCase for official Gemini endpoints', () => {
+  it('uses camelCase for official Gemini endpoints', () => {
     expect(getGeminiRequestStyleOrder('https://generativelanguage.googleapis.com/v1beta')).toEqual([
       'camel',
-      'snake',
     ])
   })
 })
@@ -148,7 +164,7 @@ describe('network diagnostics', () => {
 })
 
 describe('generateImageFromPrompt', () => {
-  it('uses snake_case first for custom gateways', async () => {
+  it('uses camelCase body and Bearer auth for custom gateways', async () => {
     vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
     vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')
 
@@ -189,8 +205,12 @@ describe('generateImageFromPrompt', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
-    expect(firstBody.generation_config).toBeTruthy()
-    expect(firstBody.generationConfig).toBeFalsy()
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: 'Bearer test-key',
+      'Content-Type': 'application/json',
+    })
+    expect(firstBody.generationConfig).toBeTruthy()
+    expect(firstBody.generation_config).toBeFalsy()
     expect(result).toMatchObject({
       route: 'gemini-generate-content',
       mimeType: 'image/png',
@@ -198,53 +218,36 @@ describe('generateImageFromPrompt', () => {
     })
   })
 
-  it('falls back from camelCase to snake_case for the official Gemini endpoint', async () => {
+  it('uses camelCase body and api-key auth for the official Gemini endpoint', async () => {
     vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
     vi.stubEnv('VITE_GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
 
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            error: {
-              message: 'Unknown name "responseModalities" at generationConfig',
-            },
-          }),
-          {
-            status: 400,
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            candidates: [
-              {
-                content: {
-                  parts: [
-                    {
-                      inline_data: {
-                        mime_type: 'image/png',
-                        data: 'Zm9v',
-                      },
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            ],
-          }),
-          {
-            status: 200,
-            headers: {
-              'Content-Type': 'application/json',
             },
-          }
-        )
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
       )
+    )
 
     vi.stubGlobal('fetch', fetchMock)
 
@@ -254,11 +257,14 @@ describe('generateImageFromPrompt', () => {
       height: 1024,
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
     const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
-    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'x-goog-api-key': 'test-key',
+      'Content-Type': 'application/json',
+    })
     expect(firstBody.generationConfig).toBeTruthy()
-    expect(secondBody.generation_config).toBeTruthy()
+    expect(firstBody.generation_config).toBeFalsy()
   })
 
   it('surfaces a clear message when the gateway does not support image editing', async () => {

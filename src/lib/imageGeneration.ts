@@ -570,7 +570,21 @@ const isOfficialGeminiBaseUrl = (baseUrl: string) => {
 }
 
 export const getGeminiRequestStyleOrder = (baseUrl: string): GeminiRequestStyle[] =>
-  isOfficialGeminiBaseUrl(baseUrl) ? ['camel', 'snake'] : ['snake', 'camel']
+  isOfficialGeminiBaseUrl(baseUrl) ? ['camel'] : ['camel']
+
+const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string): Record<string, string> => {
+  if (isOfficialGeminiBaseUrl(baseUrl)) {
+    return {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    }
+  }
+
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  }
+}
 
 const normalizeGeminiError = (
   error: unknown,
@@ -613,6 +627,7 @@ const requestGeminiImage = async (
       model: config.imageModel,
       style,
       aspectRatio: params.aspectRatio || pickNearestImageAspectRatio(params.width, params.height),
+      authMode: isOfficialGeminiBaseUrl(config.baseUrl) ? 'x-goog-api-key' : 'bearer',
       hasReferenceImage: referenceImageCount > 0,
       referenceImageCount,
     })
@@ -620,10 +635,7 @@ const requestGeminiImage = async (
 
   const response = await fetchWithNetworkHint(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': config.apiKey,
-    },
+    headers: buildGeminiRequestHeaders(config.baseUrl, config.apiKey),
     signal: params.signal,
     body: JSON.stringify(requestBody),
   })
