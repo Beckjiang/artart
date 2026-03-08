@@ -1429,22 +1429,67 @@ button {
 
 .workbench-selection-card {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   border: 1px solid #dde6f2;
   border-radius: 16px;
   background: #fff;
   padding: 12px;
 }
 
-.workbench-selection-card img {
-  width: 72px;
-  height: 72px;
-  object-fit: cover;
-  border-radius: 12px;
+.workbench-selection-preview-shell {
+  width: 100%;
+}
+
+.workbench-selection-preview {
+  position: relative;
+  width: 100%;
+  min-height: 120px;
+  max-height: 240px;
+  overflow: hidden;
+  border-radius: 14px;
   border: 1px solid #d3deef;
+  background:
+    linear-gradient(45deg, rgba(234, 240, 248, 0.9) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(234, 240, 248, 0.9) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(234, 240, 248, 0.9) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(234, 240, 248, 0.9) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0px;
+}
+
+.workbench-selection-preview img,
+.workbench-selection-mask-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.workbench-selection-preview img {
+  object-fit: contain;
   background: #eef3fb;
-  flex-shrink: 0;
+  user-select: none;
+}
+
+.workbench-selection-preview.is-mask-enabled {
+  box-shadow: 0 0 0 3px rgba(180, 88, 220, 0.14);
+}
+
+.workbench-selection-mask-canvas {
+  pointer-events: none;
+}
+
+.workbench-selection-mask-canvas.is-interactive {
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.workbench-selection-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .workbench-selection-card strong,
@@ -1480,6 +1525,75 @@ button {
   border-radius: 16px;
   background: #fff;
   padding: 12px;
+}
+
+.workbench-mask-panel {
+  border: 1px solid #dde6f2;
+  border-radius: 16px;
+  background: #fff;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.workbench-mask-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.workbench-mask-panel__header strong {
+  color: #1c2b44;
+}
+
+.workbench-mask-panel__header p {
+  margin: 4px 0 0;
+  color: #647089;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workbench-mask-toggle,
+.workbench-mask-controls button,
+.workbench-mask-controls select {
+  border: 1px solid #c9d6eb;
+  border-radius: 12px;
+  background: #fff;
+  color: #273a5f;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.workbench-mask-toggle {
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.workbench-mask-toggle.is-active,
+.workbench-mask-controls button.is-active {
+  border-color: #b04dcf;
+  background: rgba(235, 212, 248, 0.42);
+  color: #8125a7;
+}
+
+.workbench-mask-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workbench-mask-controls button,
+.workbench-mask-controls select {
+  padding: 8px 12px;
+}
+
+.workbench-mask-controls button[disabled],
+.workbench-mask-controls select[disabled],
+.workbench-mask-toggle[disabled] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .workbench-preset-card__top {

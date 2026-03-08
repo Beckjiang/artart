@@ -4,6 +4,7 @@ import type {
   FormEvent,
   KeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactNode,
 } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
@@ -26,6 +27,7 @@ import {
 } from '../lib/imageGeneration'
 import type { ImageAspectRatio } from '../lib/imageGeneration'
 import {
+  getSelectionImagineSourceImage,
   getGeneratorCardPlacement,
   getGeneratorCardSize,
   getInsertPlacement,
@@ -36,6 +38,18 @@ import type { AssistantMode, GenerationTaskOrigin } from '../lib/workbenchGenera
 import { CameraAngleDialog } from './CameraAngleDialog'
 import { DEFAULT_CAMERA_VIEW, buildCameraAnglePrompt } from '../lib/cameraAngle'
 import type { CameraRunState, CameraViewDraft } from '../lib/cameraAngle'
+import {
+  DEFAULT_MASK_FEATHER_PX,
+  buildSemanticMaskPrompt,
+  compositeMaskedEditResult,
+  drawMaskStrokes,
+  prepareMaskedEditAssets,
+} from '../lib/maskedImageEdit'
+import type {
+  MaskBounds,
+  MaskStrokeMode,
+  NormalizedMaskStroke,
+} from '../lib/maskedImageEdit'
 
 const INSERT_GAP = 40
 const MAX_TASKS = 16
@@ -47,8 +61,10 @@ const GENERATOR_PLACEHOLDER_LABEL = 'Image Generator'
 const GENERATED_IMAGE_ROLE = 'generated-image'
 const TASK_TARGET_REMOVED = 'TASK_TARGET_REMOVED'
 const SELECTION_IMAGINE_PROMPT = '根据图片标注信息生成图片'
+const MASK_BRUSH_SIZES = [8, 16, 24, 32] as const
 
 type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+type GenerationTaskMaskMode = 'semantic-crop'
 
 type ToolId = 'select' | 'frame' | 'rectangle' | 'text' | 'draw' | 'asset'
 type ToolIconId = ToolId | 'generator'
@@ -112,9 +128,18 @@ type GenerationTask = {
   insertY: number
   targetShapeId: TLImageShape['id']
   referenceImageUrl?: string
+  referenceImageUrls?: string[]
   referenceImageMimeType?: string | null
+  referenceImageMimeTypes?: Array<string | null>
   sourceShapeId?: TLImageShape['id']
   sourceAction: AssistantActionPreset
+  maskMode?: GenerationTaskMaskMode
+  maskBounds?: MaskBounds
+  maskImageUrl?: string
+  sourceSnapshotUrl?: string
+  sourceSnapshotWidth?: number
+  sourceSnapshotHeight?: number
+  compositeFeatherPx?: number
   resultShapeId?: TLImageShape['id']
   retries: number
   createdAt: number
@@ -698,15 +723,24 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const [cameraGeneratedMimeType, setCameraGeneratedMimeType] = useState<string | null>(null)
   const [cameraError, setCameraError] = useState('')
   const [cameraAbortController, setCameraAbortController] = useState<AbortController | null>(null)
+  const [maskEnabled, setMaskEnabled] = useState(false)
+  const [showMaskOverlay, setShowMaskOverlay] = useState(true)
+  const [maskTool, setMaskTool] = useState<MaskStrokeMode>('paint')
+  const [maskBrushSize, setMaskBrushSize] = useState<number>(24)
+  const [maskStrokes, setMaskStrokes] = useState<NormalizedMaskStroke[]>([])
+  const [maskStageSize, setMaskStageSize] = useState({ width: 0, height: 0 })
 
   const titleInputRef = useRef<HTMLInputElement>(null)
   const sidebarPromptInputRef = useRef<HTMLTextAreaElement>(null)
   const generatorPromptInputRef = useRef<HTMLTextAreaElement>(null)
+  const maskPreviewStageRef = useRef<HTMLDivElement>(null)
+  const maskPreviewCanvasRef = useRef<HTMLCanvasElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const boardTouchTimerRef = useRef<number | null>(null)
   const tasksRef = useRef<GenerationTask[]>(tasks)
   const cameraAbortControllerRef = useRef<AbortController | null>(null)
   const cameraAngleSessionRef = useRef(0)
+  const activeMaskPointerRef = useRef<number | null>(null)
 
   useEffect(() => {
     tasksRef.current = tasks
@@ -750,6 +784,21 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       const selectedImage = getSingleSelectedImage(onlySelectedShape)
       const selectedCount = selectedShapeIds.length
       const hasAnySelectedImage = selectedShapes.some((shape) => shape.type === 'image')
+      const firstSelectedImage = getSelectionImagineSourceImage(
+        selectedShapes.flatMap((shape) => {
+          if (shape.type !== 'image') return []
+
+          const imageShape = shape as TLImageShape
+          return [
+            {
+              shapeId: imageShape.id,
+              width: imageShape.props.w,
+              height: imageShape.props.h,
+              isGenerator: isGeneratorShape(imageShape),
+            },
+          ]
+        })
+      )
       const hasSelectedGeneratorCard = selectedShapes.some(
         (shape) => shape.type === 'image' && isGeneratorShape(shape as TLImageShape)
       )
@@ -766,6 +815,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         canEditSingleImage && editor.isInAny('select.idle', 'select.pointing_shape')
       const canImagineSelection =
         assistantMode === 'selection-imagine' &&
+        Boolean(firstSelectedImage) &&
         !hasSelectedGeneratorCard &&
         editor.isInAny('select.idle', 'select.pointing_shape')
       const selectionBounds =
@@ -777,6 +827,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         selectedShapeIds,
         selectedCount,
         hasAnySelectedImage,
+        firstSelectedImage,
         hasSelectedGeneratorCard,
         selectedImage,
         isLocked,
@@ -801,6 +852,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const selectedGeneratorImage = assistantMode === 'image-generator' ? selectedImage : null
   const showSidebar = assistantMode === 'image-edit' || assistantMode === 'disabled'
   const selectedSidebarImage = showSidebar ? selectedImage : null
+  const selectionNeedsImagineImage =
+    assistantMode === 'disabled' &&
+    selectionState.selectedCount > 1 &&
+    !selectionState.hasAnySelectedImage
 
   const runningCount = useMemo(
     () => tasks.filter((task) => task.status === 'running').length,
@@ -923,6 +978,22 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [editor]
   )
 
+  const exportSelectedImageSnapshot = useCallback(
+    async (shape: TLImageShape) => {
+      const exported = await editor.toImage([shape.id], { format: 'png' })
+      const imageUrl = await blobToDataUrl(exported.blob)
+      const dimensions = await getImageDimensions(imageUrl)
+
+      return {
+        imageUrl,
+        mimeType: 'image/png' as const,
+        width: dimensions.width,
+        height: dimensions.height,
+      }
+    },
+    [editor]
+  )
+
   useEffect(() => {
     let disposed = false
 
@@ -1010,6 +1081,168 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       height: Math.max(1, Math.round(selectedSidebarImage.props.h)),
     }
   }, [selectedPreviewSrc, selectedSidebarImage])
+
+  useEffect(() => {
+    activeMaskPointerRef.current = null
+    setMaskEnabled(false)
+    setShowMaskOverlay(true)
+    setMaskTool('paint')
+    setMaskBrushSize(24)
+    setMaskStrokes([])
+    setMaskStageSize({ width: 0, height: 0 })
+  }, [selectedImage?.id])
+
+  useEffect(() => {
+    const element = maskPreviewStageRef.current
+    if (!element || !selectedImagePreview) {
+      setMaskStageSize({ width: 0, height: 0 })
+      return
+    }
+
+    const updateSize = (width: number, height: number) => {
+      setMaskStageSize({
+        width: Math.max(0, Math.round(width)),
+        height: Math.max(0, Math.round(height)),
+      })
+    }
+
+    updateSize(element.clientWidth, element.clientHeight)
+
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      updateSize(entry.contentRect.width, entry.contentRect.height)
+    })
+
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [selectedImagePreview])
+
+  useEffect(() => {
+    const canvas = maskPreviewCanvasRef.current
+    if (!canvas) return
+
+    const width = Math.max(0, maskStageSize.width)
+    const height = Math.max(0, maskStageSize.height)
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    if (width === 0 || height === 0) {
+      canvas.width = 1
+      canvas.height = 1
+      context.clearRect(0, 0, 1, 1)
+      return
+    }
+
+    const devicePixelRatio = window.devicePixelRatio || 1
+    canvas.width = Math.max(1, Math.round(width * devicePixelRatio))
+    canvas.height = Math.max(1, Math.round(height * devicePixelRatio))
+    canvas.style.width = `${width}px`
+    canvas.style.height = `${height}px`
+
+    context.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0)
+    if (!maskEnabled || !showMaskOverlay) {
+      context.clearRect(0, 0, width, height)
+      return
+    }
+
+    drawMaskStrokes(context, maskStrokes, width, height, {
+      paintColor: 'rgba(217, 70, 239, 0.45)',
+    })
+  }, [maskEnabled, maskStageSize.height, maskStageSize.width, maskStrokes, showMaskOverlay])
+
+  const getNormalizedMaskPoint = useCallback(
+    (clientX: number, clientY: number) => {
+      const element = maskPreviewStageRef.current
+      if (!element) return null
+
+      const rect = element.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return null
+
+      return {
+        point: {
+          x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+          y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height)),
+        },
+        sizeRatio: maskBrushSize / Math.max(1, Math.min(rect.width, rect.height)),
+      }
+    },
+    [maskBrushSize]
+  )
+
+  const handleMaskPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (!maskEnabled || !showMaskOverlay || !selectedImagePreview) return
+
+      const payload = getNormalizedMaskPoint(event.clientX, event.clientY)
+      if (!payload) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      activeMaskPointerRef.current = event.pointerId
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setSidebarError('')
+      setMaskStrokes((previous) => [
+        ...previous,
+        {
+          mode: maskTool,
+          sizeRatio: payload.sizeRatio,
+          points: [payload.point],
+        },
+      ])
+    },
+    [getNormalizedMaskPoint, maskEnabled, maskTool, selectedImagePreview, showMaskOverlay]
+  )
+
+  const handleMaskPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (activeMaskPointerRef.current !== event.pointerId) return
+
+      const payload = getNormalizedMaskPoint(event.clientX, event.clientY)
+      if (!payload) return
+
+      event.preventDefault()
+      event.stopPropagation()
+
+      setMaskStrokes((previous) => {
+        if (previous.length === 0) return previous
+
+        const next = [...previous]
+        const lastStroke = next[next.length - 1]
+        if (!lastStroke) return previous
+
+        const lastPoint = lastStroke.points[lastStroke.points.length - 1]
+        if (
+          lastPoint &&
+          Math.abs(lastPoint.x - payload.point.x) < 0.002 &&
+          Math.abs(lastPoint.y - payload.point.y) < 0.002
+        ) {
+          return previous
+        }
+
+        next[next.length - 1] = {
+          ...lastStroke,
+          points: [...lastStroke.points, payload.point],
+        }
+
+        return next
+      })
+    },
+    [getNormalizedMaskPoint]
+  )
+
+  const handleMaskPointerEnd = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+    if (activeMaskPointerRef.current !== event.pointerId) return
+
+    activeMaskPointerRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }, [])
 
   const floatingActionStyle = useMemo<CSSProperties | null>(() => {
     const bounds = selectionState.selectionBounds
@@ -1664,7 +1897,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           height: task.height,
           aspectRatio: task.aspectRatio,
           referenceImageUrl: task.referenceImageUrl,
+          referenceImageUrls: task.referenceImageUrls,
           referenceImageMimeType: task.referenceImageMimeType,
+          referenceImageMimeTypes: task.referenceImageMimeTypes,
           signal: controller.signal,
         })
 
@@ -1673,24 +1908,45 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         let generatedImageUrl = generated.imageUrl
         let generatedImageMimeType = generated.mimeType || 'image/png'
 
-        try {
-          const normalized = await maybePadImageToTargetRatio(
-            generated.imageUrl,
-            task.width,
-            task.height,
-            controller.signal
-          )
-          generatedImageWidth = normalized.width
-          generatedImageHeight = normalized.height
-          generatedImageUrl = normalized.imageUrl
-          generatedImageMimeType = normalized.mimeType
-        } catch {
+        if (
+          task.maskMode === 'semantic-crop' &&
+          task.maskBounds &&
+          task.maskImageUrl &&
+          task.sourceSnapshotUrl
+        ) {
+          const composited = await compositeMaskedEditResult({
+            baseImageUrl: task.sourceSnapshotUrl,
+            patchImageUrl: generated.imageUrl,
+            maskImageUrl: task.maskImageUrl,
+            maskBounds: task.maskBounds,
+            featherPx: task.compositeFeatherPx ?? DEFAULT_MASK_FEATHER_PX,
+            signal: controller.signal,
+          })
+
+          generatedImageWidth = composited.width
+          generatedImageHeight = composited.height
+          generatedImageUrl = composited.imageUrl
+          generatedImageMimeType = composited.mimeType
+        } else {
           try {
-            const dimensions = await getImageDimensions(generated.imageUrl, controller.signal)
-            generatedImageWidth = dimensions.width
-            generatedImageHeight = dimensions.height
+            const normalized = await maybePadImageToTargetRatio(
+              generated.imageUrl,
+              task.width,
+              task.height,
+              controller.signal
+            )
+            generatedImageWidth = normalized.width
+            generatedImageHeight = normalized.height
+            generatedImageUrl = normalized.imageUrl
+            generatedImageMimeType = normalized.mimeType
           } catch {
-            // noop
+            try {
+              const dimensions = await getImageDimensions(generated.imageUrl, controller.signal)
+              generatedImageWidth = dimensions.width
+              generatedImageHeight = dimensions.height
+            } catch {
+              // noop
+            }
           }
         }
 
@@ -1742,11 +1998,38 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         selectAndRevealShape(shapeId)
 
         const debugImages = [
-          {
-            label: 'input',
-            url: task.referenceImageUrl,
-            mimeType: task.referenceImageMimeType || undefined,
-          },
+          ...(task.referenceImageUrls?.map((url, index) => ({
+            label: index === 0 ? 'input-crop' : 'input-highlight',
+            url,
+            mimeType: task.referenceImageMimeTypes?.[index] || undefined,
+          })) || []),
+          ...(task.referenceImageUrl
+            ? [
+                {
+                  label: 'input',
+                  url: task.referenceImageUrl,
+                  mimeType: task.referenceImageMimeType || undefined,
+                },
+              ]
+            : []),
+          ...(task.sourceSnapshotUrl
+            ? [
+                {
+                  label: 'input-source',
+                  url: task.sourceSnapshotUrl,
+                  mimeType: 'image/png',
+                },
+              ]
+            : []),
+          ...(task.maskImageUrl
+            ? [
+                {
+                  label: 'input-mask',
+                  url: task.maskImageUrl,
+                  mimeType: 'image/png',
+                },
+              ]
+            : []),
           {
             label: 'output-raw',
             url: generated.imageUrl,
@@ -1903,13 +2186,54 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       selectedAsset && selectedAsset.type === 'image'
         ? selectedAsset.props.mimeType || 'image/png'
         : undefined
+    let referenceImageUrls: string[] | undefined
+    let referenceImageMimeTypes: Array<string | null> | undefined
+    let taskPrompt = promptText
+    let taskAspectRatio = sidebarAspectRatio
+    let maskMode: GenerationTaskMaskMode | undefined
+    let maskBounds: MaskBounds | undefined
+    let maskImageUrl: string | undefined
+    let sourceSnapshotUrl: string | undefined
+    let sourceSnapshotWidth: number | undefined
+    let sourceSnapshotHeight: number | undefined
+    let compositeFeatherPx: number | undefined
 
-    try {
-      const exported = await editor.toImage([selectedImage.id], { format: 'png' })
-      referenceImageUrl = await blobToDataUrl(exported.blob)
-      referenceImageMimeType = 'image/png'
-    } catch {
-      // noop
+    if (maskEnabled) {
+      try {
+        const snapshot = await exportSelectedImageSnapshot(selectedImage)
+        const prepared = await prepareMaskedEditAssets({
+          sourceImageUrl: snapshot.imageUrl,
+          strokes: maskStrokes,
+        })
+
+        taskPrompt = buildSemanticMaskPrompt(promptText)
+        taskAspectRatio = pickNearestImageAspectRatio(
+          prepared.maskBounds.width,
+          prepared.maskBounds.height
+        )
+        referenceImageUrl = undefined
+        referenceImageMimeType = undefined
+        referenceImageUrls = [prepared.sourceCropUrl, prepared.highlightCropUrl]
+        referenceImageMimeTypes = ['image/png', 'image/png']
+        maskMode = 'semantic-crop'
+        maskBounds = prepared.maskBounds
+        maskImageUrl = prepared.maskCropUrl
+        sourceSnapshotUrl = snapshot.imageUrl
+        sourceSnapshotWidth = prepared.sourceWidth
+        sourceSnapshotHeight = prepared.sourceHeight
+        compositeFeatherPx = DEFAULT_MASK_FEATHER_PX
+      } catch (error) {
+        setSidebarError(error instanceof Error ? error.message : '准备蒙版编辑失败')
+        return
+      }
+    } else {
+      try {
+        const exported = await editor.toImage([selectedImage.id], { format: 'png' })
+        referenceImageUrl = await blobToDataUrl(exported.blob)
+        referenceImageMimeType = 'image/png'
+      } catch {
+        // noop
+      }
     }
 
     try {
@@ -1925,8 +2249,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         id: createTaskId(),
         mode: 'image-edit',
         origin: 'image-edit-sidebar',
-        prompt: promptText,
-        aspectRatio: sidebarAspectRatio,
+        prompt: taskPrompt,
+        aspectRatio: taskAspectRatio,
         status: 'queued',
         width: placement.width,
         height: placement.height,
@@ -1934,9 +2258,18 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         insertY: placement.insertY,
         targetShapeId: placeholderShapeId,
         referenceImageUrl,
+        referenceImageUrls,
         referenceImageMimeType,
+        referenceImageMimeTypes,
         sourceShapeId: placement.referenceImage?.sourceShapeId as TLImageShape['id'] | undefined,
         sourceAction: activePreset,
+        maskMode,
+        maskBounds,
+        maskImageUrl,
+        sourceSnapshotUrl,
+        sourceSnapshotWidth,
+        sourceSnapshotHeight,
+        compositeFeatherPx,
         retries: 0,
         createdAt: now,
         updatedAt: now,
@@ -1954,6 +2287,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     assistantMode,
     createPlaceholderShape,
     editor,
+    exportSelectedImageSnapshot,
+    maskEnabled,
+    maskStrokes,
     selectAndRevealShape,
     selectedImage,
     sidebarAspectRatio,
@@ -2025,9 +2361,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     if (assistantMode !== 'selection-imagine' || !selectionState.canImagineSelection) return
 
     const selectedShapeIds = [...selectionState.selectedShapeIds]
+    const firstSelectedImage = selectionState.firstSelectedImage
     const selectionPageBounds = selectionState.selectionPageBounds
 
-    if (selectedShapeIds.length < 2 || !selectionPageBounds) {
+    if (selectedShapeIds.length < 2 || !selectionPageBounds || !firstSelectedImage) {
       return
     }
 
@@ -2044,6 +2381,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           height: selectionPageBounds.h,
           minY: selectionPageBounds.minY,
           maxX: selectionPageBounds.maxX,
+        },
+        selectionOutputSize: {
+          width: firstSelectedImage.width,
+          height: firstSelectedImage.height,
         },
         insertGap: INSERT_GAP,
       })
@@ -2063,7 +2404,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         mode: 'selection-imagine',
         origin: 'selection-imagine-actionbar',
         prompt: SELECTION_IMAGINE_PROMPT,
-        aspectRatio: pickNearestImageAspectRatio(placement.width, placement.height),
+        aspectRatio: pickNearestImageAspectRatio(
+          firstSelectedImage.width,
+          firstSelectedImage.height
+        ),
         status: 'queued',
         width: placement.width,
         height: placement.height,
@@ -2091,6 +2435,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     editor,
     selectAndRevealShape,
     selectionState.canImagineSelection,
+    selectionState.firstSelectedImage,
     selectionState.selectedShapeIds,
     selectionState.selectionPageBounds,
   ])
@@ -2235,6 +2580,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
   const selectionMessage = useMemo(() => {
     if (assistantMode === 'disabled') {
+      if (selectionNeedsImagineImage) {
+        return '当前多选中至少需要一张图片才能 imagine。'
+      }
+
       if (selectedImage && selectionState.isLocked) {
         return '当前图片已锁定，请先解锁后再进行 AI 编辑。'
       }
@@ -2255,7 +2604,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     }
 
     return '点击底部 Image Generator 按钮，在画布中插入一个文生图卡片。'
-  }, [assistantMode, selectedImage, selectionState.isLocked, selectionState.selectedCount])
+  }, [
+    assistantMode,
+    selectedImage,
+    selectionNeedsImagineImage,
+    selectionState.isLocked,
+    selectionState.selectedCount,
+  ])
 
   const selectionCardTitle = useMemo(() => {
     if (selectedImagePreview) {
@@ -2263,11 +2618,15 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     }
 
     if (assistantMode === 'disabled') {
+      if (selectionNeedsImagineImage) {
+        return '请至少选择一张图片'
+      }
+
       return '请调整图片选择'
     }
 
     return '等待选择图片'
-  }, [assistantMode, selectedImagePreview])
+  }, [assistantMode, selectedImagePreview, selectionNeedsImagineImage])
 
   const emptyTaskMessage = useMemo(() => {
     if (assistantMode === 'image-edit') {
@@ -2279,13 +2638,29 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     }
 
     if (assistantMode === 'disabled') {
+      if (selectionNeedsImagineImage) {
+        return '还没有任务。先在当前多选中加入一张图片。'
+      }
+
       return '还没有任务。请先调整当前选择状态。'
     }
 
     return '还没有任务。先创建一个图片编辑任务。'
-  }, [assistantMode])
+  }, [assistantMode, selectionNeedsImagineImage])
 
   const presetHelperText = assistantMode === 'disabled' ? selectionMessage : activePresetDefinition.helper
+  const canUseMaskEditor = assistantMode === 'image-edit' && Boolean(selectedImagePreview)
+  const maskStatusText = useMemo(() => {
+    if (!canUseMaskEditor) {
+      return '先选择一张可编辑图片后再使用局部蒙版。'
+    }
+
+    if (!maskEnabled) {
+      return '关闭时按整张图片编辑；开启后可用画笔限定局部重绘区域。'
+    }
+
+    return `当前使用${maskTool === 'paint' ? '画笔' : '橡皮擦'}，笔刷 ${maskBrushSize}px。Gemini 将参考高亮局部图进行语义重绘。`
+  }, [canUseMaskEditor, maskBrushSize, maskEnabled, maskTool])
   const generatorStatusText = useMemo(() => {
     if (generatorBusy) {
       return selectedGeneratorTask?.status === 'queued' ? '任务已加入队列。' : '正在生成图片，请稍候。'
@@ -2685,16 +3060,36 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           <div className="workbench-selection-card">
             {selectedImagePreview ? (
               <>
-                <img
-                  src={selectedImagePreview.src}
-                  alt="当前选中图片预览"
-                  onError={handlePreviewImageError}
-                />
-                <div>
+                <div className="workbench-selection-preview-shell">
+                  <div
+                    ref={maskPreviewStageRef}
+                    className={`workbench-selection-preview ${maskEnabled ? 'is-mask-enabled' : ''}`}
+                    style={{ aspectRatio: `${selectedImagePreview.width} / ${selectedImagePreview.height}` }}
+                  >
+                    <img
+                      src={selectedImagePreview.src}
+                      alt="当前选中图片预览"
+                      onError={handlePreviewImageError}
+                      draggable={false}
+                    />
+                    <canvas
+                      ref={maskPreviewCanvasRef}
+                      className={`workbench-selection-mask-canvas ${maskEnabled && showMaskOverlay ? 'is-interactive' : ''}`}
+                      onPointerDown={handleMaskPointerDown}
+                      onPointerMove={handleMaskPointerMove}
+                      onPointerUp={handleMaskPointerEnd}
+                      onPointerCancel={handleMaskPointerEnd}
+                    />
+                  </div>
+                </div>
+                <div className="workbench-selection-meta">
                   <strong>{selectionCardTitle}</strong>
                   <p>
                     {selectedImagePreview.width} × {selectedImagePreview.height}
                   </p>
+                  {assistantMode === 'image-edit' ? (
+                    <p>{maskEnabled ? '局部蒙版已开启' : '可直接整图编辑，也可开启蒙版只改局部。'}</p>
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -2706,6 +3101,82 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           </div>
 
           <div className="workbench-sidebar-note">{selectionMessage}</div>
+
+          {assistantMode === 'image-edit' ? (
+            <div className="workbench-mask-panel">
+              <div className="workbench-mask-panel__header">
+                <div>
+                  <strong>语义蒙版</strong>
+                  <p>{maskStatusText}</p>
+                </div>
+                <button
+                  type="button"
+                  className={`workbench-mask-toggle ${maskEnabled ? 'is-active' : ''}`}
+                  onClick={() => {
+                    setMaskEnabled((value) => !value)
+                    setShowMaskOverlay(true)
+                    setSidebarError('')
+                  }}
+                  onMouseDown={handleToolbarMouseDown}
+                  disabled={!canUseMaskEditor}
+                >
+                  {maskEnabled ? '已开启' : '开启蒙版'}
+                </button>
+              </div>
+
+              <div className="workbench-mask-controls">
+                <button
+                  type="button"
+                  className={maskTool === 'paint' ? 'is-active' : ''}
+                  onClick={() => setMaskTool('paint')}
+                  onMouseDown={handleToolbarMouseDown}
+                  disabled={!maskEnabled || !canUseMaskEditor}
+                >
+                  画笔
+                </button>
+                <button
+                  type="button"
+                  className={maskTool === 'erase' ? 'is-active' : ''}
+                  onClick={() => setMaskTool('erase')}
+                  onMouseDown={handleToolbarMouseDown}
+                  disabled={!maskEnabled || !canUseMaskEditor}
+                >
+                  橡皮擦
+                </button>
+                <select
+                  value={maskBrushSize}
+                  onChange={(event) => setMaskBrushSize(Number(event.target.value))}
+                  disabled={!maskEnabled || !canUseMaskEditor}
+                  aria-label="选择蒙版笔刷大小"
+                >
+                  {MASK_BRUSH_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowMaskOverlay((value) => !value)}
+                  onMouseDown={handleToolbarMouseDown}
+                  disabled={!maskEnabled || !canUseMaskEditor}
+                >
+                  {showMaskOverlay ? '隐藏遮罩' : '显示遮罩'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMaskStrokes([])
+                    setSidebarError('')
+                  }}
+                  onMouseDown={handleToolbarMouseDown}
+                  disabled={!maskEnabled || !canUseMaskEditor || maskStrokes.length === 0}
+                >
+                  清空
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="workbench-preset-card">
             <div className="workbench-preset-card__top">

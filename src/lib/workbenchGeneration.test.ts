@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getSelectionImagineSourceImage,
   getGeneratorCardPlacement,
   getGeneratorCardSize,
   getInsertPlacement,
@@ -74,7 +75,7 @@ describe('resolveAssistantMode', () => {
     ).toBe('selection-imagine')
   })
 
-  it('uses selection-imagine for multi-selects without images', () => {
+  it('uses disabled for multi-selects without images', () => {
     expect(
       resolveAssistantMode({
         selectedCount: 2,
@@ -82,7 +83,50 @@ describe('resolveAssistantMode', () => {
         singleSelectedImageIsLocked: false,
         singleSelectedImageIsGenerator: false,
       })
-    ).toBe('selection-imagine')
+    ).toBe('disabled')
+  })
+})
+
+describe('getSelectionImagineSourceImage', () => {
+  it('uses the first non-generator image in selection order', () => {
+    expect(
+      getSelectionImagineSourceImage([
+        {
+          shapeId: 'shape:generator',
+          width: 640,
+          height: 640,
+          isGenerator: true,
+        },
+        {
+          shapeId: 'shape:photo',
+          width: 321.4,
+          height: 180.2,
+        },
+        {
+          shapeId: 'shape:poster',
+          width: 500,
+          height: 700,
+        },
+      ])
+    ).toEqual({
+      shapeId: 'shape:photo',
+      width: 321,
+      height: 180,
+      isGenerator: false,
+    })
+  })
+
+  it('returns null when there is no usable plain image', () => {
+    expect(
+      getSelectionImagineSourceImage([
+        {
+          shapeId: 'shape:generator',
+          width: 640,
+          height: 640,
+          isGenerator: true,
+        },
+      ])
+    ).toBeNull()
   })
 })
 
@@ -186,6 +230,37 @@ describe('getInsertPlacement', () => {
     ).toEqual({
       width: 360,
       height: 220,
+      insertX: 486,
+      insertY: 118,
+    })
+  })
+
+  it('uses the first selected image size for selection-imagine output when provided', () => {
+    expect(
+      getInsertPlacement('selection-imagine', {
+        viewportBounds: {
+          x: 0,
+          y: 0,
+          w: 1200,
+          h: 800,
+        },
+        selectionBounds: {
+          x: 80,
+          y: 120,
+          width: 360,
+          height: 220,
+          minY: 118,
+          maxX: 446,
+        },
+        selectionOutputSize: {
+          width: 300,
+          height: 500,
+        },
+        insertGap: 40,
+      })
+    ).toEqual({
+      width: 300,
+      height: 500,
       insertX: 486,
       insertY: 118,
     })

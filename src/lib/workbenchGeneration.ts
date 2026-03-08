@@ -19,6 +19,13 @@ export type WorkbenchSelectionSummary = {
   singleSelectedImageIsGenerator: boolean
 }
 
+export type WorkbenchSelectionImagineImage = {
+  shapeId: string
+  width: number
+  height: number
+  isGenerator?: boolean
+}
+
 export type WorkbenchBounds = {
   x: number
   y: number
@@ -51,6 +58,10 @@ export type WorkbenchEditorState = {
   viewportBounds: WorkbenchBounds
   selectedImage?: WorkbenchSelectedImage | null
   selectionBounds?: WorkbenchSelectionBounds | null
+  selectionOutputSize?: {
+    width: number
+    height: number
+  } | null
   insertGap?: number
 }
 
@@ -91,10 +102,34 @@ export const resolveAssistantMode = ({
   }
 
   if (selectedCount > 1) {
+    if (!hasAnySelectedImage) return 'disabled'
     return 'selection-imagine'
   }
 
   return 'neutral'
+}
+
+export const getSelectionImagineSourceImage = (
+  selectedImages: WorkbenchSelectionImagineImage[]
+): WorkbenchSelectionImagineImage | null => {
+  for (const image of selectedImages) {
+    if (image.isGenerator) continue
+
+    const width = Number(image.width)
+    const height = Number(image.height)
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      continue
+    }
+
+    return {
+      shapeId: image.shapeId,
+      width: Math.round(width),
+      height: Math.round(height),
+      isGenerator: false,
+    }
+  }
+
+  return null
 }
 
 export const getGeneratorCardSize = (
@@ -165,8 +200,16 @@ export const getInsertPlacement = (
       throw new Error('缺少选区范围，无法计算 imagine 插入位置')
     }
 
-    const width = Math.max(MIN_GENERATED_EDGE, Math.round(selectionBounds.width))
-    const height = Math.max(MIN_GENERATED_EDGE, Math.round(selectionBounds.height))
+    const outputWidth = editorState.selectionOutputSize?.width
+    const outputHeight = editorState.selectionOutputSize?.height
+    const width =
+      Number.isFinite(outputWidth) && Number(outputWidth) > 0
+        ? Math.round(Number(outputWidth))
+        : Math.max(MIN_GENERATED_EDGE, Math.round(selectionBounds.width))
+    const height =
+      Number.isFinite(outputHeight) && Number(outputHeight) > 0
+        ? Math.round(Number(outputHeight))
+        : Math.max(MIN_GENERATED_EDGE, Math.round(selectionBounds.height))
 
     return {
       width,

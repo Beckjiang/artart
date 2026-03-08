@@ -321,6 +321,81 @@ describe('generateImageFromPrompt', () => {
       })
     ).rejects.toThrow('当前 Gemini 网关返回“图生图服务调用失败”')
   })
+
+  it('sends multiple reference images through generateContent without a mask field', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
+
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url = String(input)
+
+      if (url.startsWith('data:image/')) {
+        return Promise.resolve(
+          new Response(new Uint8Array([137, 80, 78, 71]), {
+            status: 200,
+            headers: {
+              'Content-Type': 'image/png',
+            },
+          })
+        )
+      }
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      inline_data: {
+                        mime_type: 'image/png',
+                        data: 'Zm9v',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      )
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal(
+      'FileReader',
+      class {
+        result = 'data:image/png;base64,Zm9v'
+        onerror: null | (() => void) = null
+        onload: null | (() => void) = null
+        readAsDataURL() {
+          this.onload?.()
+        }
+      }
+    )
+
+    await generateImageFromPrompt({
+      prompt: '只修改高亮区域',
+      width: 512,
+      height: 512,
+      referenceImageUrls: ['data:image/png;base64,Zm9v', 'data:image/png;base64,YmFy'],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))
+    expect(requestBody.contents[0].parts).toHaveLength(3)
+    expect(requestBody.contents[0].parts[1].inlineData).toBeTruthy()
+    expect(requestBody.contents[0].parts[2].inlineData).toBeTruthy()
+    expect(requestBody.mask).toBeUndefined()
+  })
 })
 
 describe('ensureGeminiApiBaseUrl', () => {
