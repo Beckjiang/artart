@@ -1,0 +1,326 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  buildGeminiGenerateContentEndpoint,
+  buildGeminiGenerateContentRequest,
+  buildNetworkErrorMessage,
+  ensureGeminiApiBaseUrl,
+  generateImageFromPrompt,
+  getGeminiRequestStyleOrder,
+  readGeminiResponse,
+  resolveGeminiConfig,
+} from './imageGeneration'
+
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
+})
+
+describe('resolveGeminiConfig', () => {
+  it('supports a bare custom domain and appends /v1beta', () => {
+    const config = resolveGeminiConfig(
+      {
+        VITE_GEMINI_API_KEY: 'test-key',
+        VITE_GEMINI_BASE_URL: 'http://zx2.52youxi.cc:3000',
+      },
+      true
+    )
+
+    expect(config.baseUrl).toBe('http://zx2.52youxi.cc:3000/v1beta')
+    expect(config.apiKey).toBe('test-key')
+  })
+
+  it('maps the legacy uniapi proxy to the gemini proxy', () => {
+    const config = resolveGeminiConfig(
+      {
+        VITE_UNIAPI_API_KEY: 'legacy-key',
+        VITE_UNIAPI_BASE_URL: '/api/uniapi',
+      },
+      true
+    )
+
+    expect(config.baseUrl).toBe('/api/gemini')
+    expect(config.apiKey).toBe('legacy-key')
+  })
+})
+
+describe('gemini request construction', () => {
+  it('uses generateContent for image editing too', () => {
+    const endpoint = buildGeminiGenerateContentEndpoint(
+      'http://zx2.52youxi.cc:3000',
+      'gemini-3.1-flash-image-preview'
+    )
+    const request = buildGeminiGenerateContentRequest({
+      prompt: '把背景换成白色',
+      aspectRatio: '1:1',
+      imageSize: '2K',
+      style: 'camel',
+      referenceParts: [
+        {
+          inlineData: {
+            mimeType: 'image/png',
+            data: 'Zm9v',
+          },
+        },
+      ],
+    })
+
+    expect(endpoint).toBe(
+      'http://zx2.52youxi.cc:3000/v1beta/models/gemini-3.1-flash-image-preview:generateContent'
+    )
+    expect(request.contents[0].parts).toEqual([
+      { text: '把背景换成白色' },
+      {
+        inlineData: {
+          mimeType: 'image/png',
+          data: 'Zm9v',
+        },
+      },
+    ])
+  })
+
+  it('supports snake_case fallback payloads', () => {
+    const request = buildGeminiGenerateContentRequest({
+      prompt: 'generate',
+      aspectRatio: '16:9',
+      imageSize: '2K',
+      style: 'snake',
+      referenceParts: [],
+    })
+
+    expect(request).toMatchObject({
+      generation_config: {
+        response_modalities: ['TEXT', 'IMAGE'],
+        image_config: {
+          aspect_ratio: '16:9',
+          image_size: '2K',
+        },
+      },
+    })
+  })
+})
+
+
+describe('request style selection', () => {
+  it('prefers snake_case for custom gateways', () => {
+    expect(getGeminiRequestStyleOrder('http://zx2.52youxi.cc:3000/v1beta')).toEqual([
+      'snake',
+      'camel',
+    ])
+  })
+
+  it('prefers camelCase for official Gemini endpoints', () => {
+    expect(getGeminiRequestStyleOrder('https://generativelanguage.googleapis.com/v1beta')).toEqual([
+      'camel',
+      'snake',
+    ])
+  })
+})
+
+describe('network diagnostics', () => {
+  it('explains proxy timeout errors clearly', () => {
+    vi.stubGlobal('window', {
+      location: {
+        origin: 'http://localhost:5173',
+        protocol: 'http:',
+      },
+    })
+
+    const message = buildNetworkErrorMessage(
+      '/api/gemini/models/gemini-3.1-flash-image-preview:generateContent',
+      new TypeError('Failed to fetch')
+    )
+
+    expect(message).toContain('当前请求仍在走 Vite 代理 `/api/gemini`')
+    expect(message).toContain('需要重启 `npm run dev`')
+    expect(message).toContain('ETIMEDOUT')
+  })
+
+  it('explains html responses from a misconfigured base url', async () => {
+    const response = new Response('<!doctype html><html><body>home</body></html>', {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+      },
+    })
+
+    await expect(readGeminiResponse(response)).rejects.toThrow('接口返回了 HTML 页面而不是 JSON')
+  })
+})
+
+describe('generateImageFromPrompt', () => {
+  it('uses snake_case first for custom gateways', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(firstBody.generation_config).toBeTruthy()
+    expect(firstBody.generationConfig).toBeFalsy()
+    expect(result).toMatchObject({
+      route: 'gemini-generate-content',
+      mimeType: 'image/png',
+      imageUrl: 'data:image/png;base64,Zm9v',
+    })
+  })
+
+  it('falls back from camelCase to snake_case for the official Gemini endpoint', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'Unknown name "responseModalities" at generationConfig',
+            },
+          }),
+          {
+            status: 400,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      inline_data: {
+                        mime_type: 'image/png',
+                        data: 'Zm9v',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(firstBody.generationConfig).toBeTruthy()
+    expect(secondBody.generation_config).toBeTruthy()
+  })
+
+  it('surfaces a clear message when the gateway does not support image editing', async () => {
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', 'http://zx2.52youxi.cc:3000')
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/png',
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              message: 'task failed :图生图服务调用失败!',
+              type: 'upstream_error',
+              code: 500,
+            },
+          }),
+          {
+            status: 500,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+      )
+
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal(
+      'FileReader',
+      class {
+        result = 'data:image/png;base64,Zm9v'
+        onerror: null | (() => void) = null
+        onload: null | (() => void) = null
+        readAsDataURL() {
+          this.onload?.()
+        }
+      }
+    )
+
+    await expect(
+      generateImageFromPrompt({
+        prompt: '编辑一下图片',
+        width: 256,
+        height: 256,
+        referenceImageUrl: 'data:image/png;base64,Zm9v',
+      })
+    ).rejects.toThrow('当前 Gemini 网关返回“图生图服务调用失败”')
+  })
+})
+
+describe('ensureGeminiApiBaseUrl', () => {
+  it('keeps existing versioned paths intact', () => {
+    expect(ensureGeminiApiBaseUrl('http://zx2.52youxi.cc:3000/v1beta')).toBe(
+      'http://zx2.52youxi.cc:3000/v1beta'
+    )
+  })
+})
