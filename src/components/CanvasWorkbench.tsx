@@ -33,6 +33,9 @@ import {
   shouldRecreateTaskTarget,
 } from '../lib/workbenchGeneration'
 import type { AssistantMode, GenerationTaskOrigin } from '../lib/workbenchGeneration'
+import { CameraAngleDialog } from './CameraAngleDialog'
+import { DEFAULT_CAMERA_VIEW, buildCameraAnglePrompt } from '../lib/cameraAngle'
+import type { CameraRunState, CameraViewDraft } from '../lib/cameraAngle'
 
 const INSERT_GAP = 40
 const MAX_TASKS = 16
@@ -77,6 +80,11 @@ type GeneratorShapeMeta = {
   canvasRole: typeof GENERATOR_ROLE
   aspectRatio: ImageAspectRatio
   lastPrompt: string
+}
+
+type CameraSourceSize = {
+  width: number
+  height: number
 }
 
 export type AssistantActionPreset =
@@ -677,6 +685,19 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     shapeId: TLImageShape['id'] | null
     ratio: ImageAspectRatio
   } | null>(null)
+  const [isCameraAngleOpen, setIsCameraAngleOpen] = useState(false)
+  const [cameraSourceShapeId, setCameraSourceShapeId] = useState<TLImageShape['id'] | null>(null)
+  const [cameraSourcePreviewUrl, setCameraSourcePreviewUrl] = useState('')
+  const [cameraReferenceImageUrl, setCameraReferenceImageUrl] = useState('')
+  const [cameraReferenceImageMimeType, setCameraReferenceImageMimeType] = useState<string | null>(null)
+  const [cameraSourceLoading, setCameraSourceLoading] = useState(false)
+  const [cameraSourceSize, setCameraSourceSize] = useState<CameraSourceSize>({ width: 0, height: 0 })
+  const [cameraRunStatus, setCameraRunStatus] = useState<CameraRunState>('idle')
+  const [cameraDraftView, setCameraDraftView] = useState<CameraViewDraft>(DEFAULT_CAMERA_VIEW)
+  const [cameraGeneratedPreviewUrl, setCameraGeneratedPreviewUrl] = useState('')
+  const [cameraGeneratedMimeType, setCameraGeneratedMimeType] = useState<string | null>(null)
+  const [cameraError, setCameraError] = useState('')
+  const [cameraAbortController, setCameraAbortController] = useState<AbortController | null>(null)
 
   const titleInputRef = useRef<HTMLInputElement>(null)
   const sidebarPromptInputRef = useRef<HTMLTextAreaElement>(null)
@@ -684,10 +705,23 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const menuRef = useRef<HTMLDivElement>(null)
   const boardTouchTimerRef = useRef<number | null>(null)
   const tasksRef = useRef<GenerationTask[]>(tasks)
+  const cameraAbortControllerRef = useRef<AbortController | null>(null)
+  const cameraAngleSessionRef = useRef(0)
 
   useEffect(() => {
     tasksRef.current = tasks
   }, [tasks])
+
+  useEffect(() => {
+    cameraAbortControllerRef.current = cameraAbortController
+  }, [cameraAbortController])
+
+  useEffect(() => {
+    return () => {
+      cameraAngleSessionRef.current += 1
+      cameraAbortControllerRef.current?.abort()
+    }
+  }, [])
 
   const currentToolId = useValue(
     'workbench-current-tool',
@@ -817,6 +851,12 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const generatorBusy =
     selectedGeneratorTask?.status === 'queued' || selectedGeneratorTask?.status === 'running'
   const canGenerateFromCard = Boolean(selectedGeneratorImage && generatorPrompt.trim() && !generatorBusy)
+  const cameraCanRun =
+    isCameraAngleOpen &&
+    !cameraSourceLoading &&
+    Boolean(cameraReferenceImageUrl) &&
+    cameraRunStatus !== 'running'
+  const cameraCanConfirm = isCameraAngleOpen && Boolean(cameraGeneratedPreviewUrl)
 
   const scheduleBoardTouch = useCallback(() => {
     if (boardTouchTimerRef.current !== null) return
@@ -944,6 +984,24 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       .catch(() => {})
   }, [exportSelectedImagePreview, selectedSidebarImage])
 
+  const resetCameraAngleDialog = useCallback(() => {
+    cameraAngleSessionRef.current += 1
+    cameraAbortControllerRef.current?.abort()
+    setCameraAbortController(null)
+    setIsCameraAngleOpen(false)
+    setCameraSourceShapeId(null)
+    setCameraSourcePreviewUrl('')
+    setCameraReferenceImageUrl('')
+    setCameraReferenceImageMimeType(null)
+    setCameraSourceLoading(false)
+    setCameraSourceSize({ width: 0, height: 0 })
+    setCameraRunStatus('idle')
+    setCameraDraftView(DEFAULT_CAMERA_VIEW)
+    setCameraGeneratedPreviewUrl('')
+    setCameraGeneratedMimeType(null)
+    setCameraError('')
+  }, [])
+
   const selectedImagePreview = useMemo(() => {
     if (!selectedSidebarImage || !selectedPreviewSrc) return null
     return {
@@ -955,7 +1013,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
   const floatingActionStyle = useMemo<CSSProperties | null>(() => {
     const bounds = selectionState.selectionBounds
-    if (!selectionState.canShowFloatingActions || !bounds) return null
+    if (isCameraAngleOpen || !selectionState.canShowFloatingActions || !bounds) return null
 
     const sidebarOffset = showSidebar ? SIDEBAR_WIDTH : 0
     const left = Math.min(bounds.midX, Math.max(120, window.innerWidth - sidebarOffset - 48))
@@ -964,7 +1022,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       left,
       top: Math.max(88, bounds.top - 20),
     }
-  }, [selectionState.canShowFloatingActions, selectionState.selectionBounds, showSidebar])
+  }, [isCameraAngleOpen, selectionState.canShowFloatingActions, selectionState.selectionBounds, showSidebar])
 
   const selectionImagineStyle = useMemo<CSSProperties | null>(() => {
     const bounds = selectionState.selectionBounds
@@ -1129,6 +1187,65 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [editor]
   )
 
+  const createImageShape = useCallback(
+    ({
+      name,
+      imageUrl,
+      mimeType,
+      width,
+      height,
+      x,
+      y,
+      altText,
+      meta,
+    }: {
+      name: string
+      imageUrl: string
+      mimeType?: string | null
+      width: number
+      height: number
+      x: number
+      y: number
+      altText?: string
+      meta?: ShapeMeta
+    }): TLImageShape['id'] => {
+      const imageAsset = AssetRecordType.create({
+        id: AssetRecordType.createId(),
+        type: 'image',
+        props: {
+          name,
+          src: imageUrl,
+          w: width,
+          h: height,
+          mimeType: mimeType || 'image/png',
+          isAnimated: false,
+        },
+      })
+
+      const shapeId = createShapeId()
+
+      editor.run(() => {
+        editor.createAssets([imageAsset])
+        editor.createShape<TLImageShape>({
+          id: shapeId,
+          type: 'image',
+          x,
+          y,
+          meta: meta ?? {},
+          props: {
+            assetId: imageAsset.id,
+            w: width,
+            h: height,
+            altText,
+          },
+        })
+      })
+
+      return shapeId
+    },
+    [editor]
+  )
+
   const updateTaskStatusPlaceholder = useCallback(
     (
       shapeId: TLImageShape['id'],
@@ -1216,6 +1333,196 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     },
     [editor]
   )
+
+  const openCameraAngleDialog = useCallback(async () => {
+    if (assistantMode !== 'image-edit' || !selectedImage) return
+
+    const sessionId = cameraAngleSessionRef.current + 1
+    cameraAngleSessionRef.current = sessionId
+
+    const nextSize = {
+      width: Math.max(1, Math.round(selectedImage.props.w)),
+      height: Math.max(1, Math.round(selectedImage.props.h)),
+    }
+
+    const selectedAsset = selectedImage.props.assetId ? editor.getAsset(selectedImage.props.assetId) : null
+    const fallbackAssetUrl =
+      selectedAsset &&
+      selectedAsset.type === 'image' &&
+      selectedAsset.props.src &&
+      !selectedAsset.props.src.startsWith('asset:')
+        ? selectedAsset.props.src
+        : ''
+    const fallbackPreviewUrl = selectedPreviewSrc || fallbackAssetUrl
+
+    setIsCameraAngleOpen(true)
+    setCameraSourceShapeId(selectedImage.id)
+    setCameraSourceSize(nextSize)
+    setCameraSourcePreviewUrl(fallbackPreviewUrl)
+    setCameraReferenceImageUrl(fallbackAssetUrl)
+    setCameraReferenceImageMimeType(
+      selectedAsset && selectedAsset.type === 'image' ? selectedAsset.props.mimeType || 'image/png' : 'image/png'
+    )
+    setCameraSourceLoading(true)
+    setCameraRunStatus('idle')
+    setCameraDraftView(DEFAULT_CAMERA_VIEW)
+    setCameraGeneratedPreviewUrl('')
+    setCameraGeneratedMimeType(null)
+    setCameraError('')
+
+    try {
+      const exported = await editor.toImage([selectedImage.id], { format: 'png' })
+      const exportedUrl = await blobToDataUrl(exported.blob)
+      if (cameraAngleSessionRef.current !== sessionId) return
+
+      setCameraSourcePreviewUrl(exportedUrl)
+      setCameraReferenceImageUrl(exportedUrl)
+      setCameraReferenceImageMimeType('image/png')
+    } catch (error) {
+      if (cameraAngleSessionRef.current !== sessionId) return
+      if (!fallbackPreviewUrl && !fallbackAssetUrl) {
+        setCameraError(error instanceof Error ? error.message : '准备参考图失败')
+      }
+    } finally {
+      if (cameraAngleSessionRef.current === sessionId) {
+        setCameraSourceLoading(false)
+      }
+    }
+  }, [assistantMode, editor, selectedImage, selectedPreviewSrc])
+
+  const closeCameraAngleDialog = useCallback(() => {
+    resetCameraAngleDialog()
+  }, [resetCameraAngleDialog])
+
+  const runCameraAngleGeneration = useCallback(async () => {
+    if (!cameraCanRun || !cameraReferenceImageUrl) return
+
+    const sessionId = cameraAngleSessionRef.current
+    const controller = new AbortController()
+    const prompt = buildCameraAnglePrompt(cameraDraftView, cameraSourceSize)
+
+    setCameraAbortController(controller)
+    setCameraRunStatus('running')
+    setCameraError('')
+
+    try {
+      const generated = await generateImageFromPrompt({
+        prompt,
+        width: cameraSourceSize.width,
+        height: cameraSourceSize.height,
+        aspectRatio: pickNearestImageAspectRatio(cameraSourceSize.width, cameraSourceSize.height),
+        referenceImageUrl: cameraReferenceImageUrl,
+        referenceImageMimeType: cameraReferenceImageMimeType,
+        signal: controller.signal,
+      })
+
+      let nextImageUrl = generated.imageUrl
+      let nextMimeType = generated.mimeType || 'image/png'
+
+      try {
+        const normalized = await maybePadImageToTargetRatio(
+          generated.imageUrl,
+          cameraSourceSize.width,
+          cameraSourceSize.height,
+          controller.signal
+        )
+        nextImageUrl = normalized.imageUrl
+        nextMimeType = normalized.mimeType
+      } catch (error) {
+        if (isAbortError(error)) throw error
+      }
+
+      if (cameraAngleSessionRef.current !== sessionId) return
+
+      setCameraGeneratedPreviewUrl(nextImageUrl)
+      setCameraGeneratedMimeType(nextMimeType)
+      setCameraRunStatus('succeeded')
+      setCameraError('')
+    } catch (error) {
+      if (cameraAngleSessionRef.current !== sessionId) return
+      if (controller.signal.aborted || isAbortError(error)) {
+        setCameraRunStatus(cameraGeneratedPreviewUrl ? 'succeeded' : 'idle')
+        setCameraError('')
+        return
+      }
+
+      setCameraRunStatus('failed')
+      setCameraError(error instanceof Error ? error.message : '视角调节生成失败，请稍后重试')
+    } finally {
+      if (cameraAngleSessionRef.current === sessionId) {
+        setCameraAbortController(null)
+      }
+    }
+  }, [
+    cameraCanRun,
+    cameraDraftView,
+    cameraGeneratedPreviewUrl,
+    cameraReferenceImageMimeType,
+    cameraReferenceImageUrl,
+    cameraSourceSize,
+  ])
+
+  const completeCameraAngleDialog = useCallback(() => {
+    if (!cameraSourceShapeId || !cameraGeneratedPreviewUrl) return
+
+    const liveShape = editor.getShape<TLImageShape>(cameraSourceShapeId)
+    if (!liveShape || liveShape.type !== 'image') {
+      setCameraRunStatus('failed')
+      setCameraError('原图已不存在，无法插入结果。')
+      return
+    }
+
+    const selectedBounds = editor.getShapePageBounds(liveShape)
+    const placement = getInsertPlacement('image-edit', {
+      viewportBounds: editor.getViewportPageBounds(),
+      selectedImage: {
+        shapeId: liveShape.id,
+        x: liveShape.x,
+        y: liveShape.y,
+        width: liveShape.props.w,
+        height: liveShape.props.h,
+        bounds: selectedBounds
+          ? {
+              minY: selectedBounds.minY,
+              maxX: selectedBounds.maxX,
+            }
+          : undefined,
+      },
+      insertGap: INSERT_GAP,
+    })
+
+    const insertedShapeId = createImageShape({
+      name: 'camera-angle-result',
+      imageUrl: cameraGeneratedPreviewUrl,
+      mimeType: cameraGeneratedMimeType || 'image/png',
+      width: placement.width,
+      height: placement.height,
+      x: placement.insertX,
+      y: placement.insertY,
+      altText: buildCameraAnglePrompt(cameraDraftView, cameraSourceSize),
+    })
+
+    selectAndRevealShape(insertedShapeId)
+
+    const updated = touchBoard(board.id)
+    if (updated) {
+      onBoardMetaChange?.()
+    }
+
+    resetCameraAngleDialog()
+  }, [
+    board.id,
+    cameraDraftView,
+    cameraGeneratedMimeType,
+    cameraGeneratedPreviewUrl,
+    cameraSourceShapeId,
+    cameraSourceSize,
+    createImageShape,
+    editor,
+    onBoardMetaChange,
+    resetCameraAngleDialog,
+    selectAndRevealShape,
+  ])
 
   const handleSelectTaskResult = useCallback(
     (task: GenerationTask) => {
@@ -2234,6 +2541,14 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
               {ACTION_PRESETS[preset].label}
             </button>
           ))}
+          <button
+            type="button"
+            className="camera-angle-action-trigger"
+            onClick={() => void openCameraAngleDialog()}
+            onMouseDown={handleToolbarMouseDown}
+          >
+            视角调节
+          </button>
         </div>
       ) : null}
 
@@ -2338,6 +2653,24 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           </form>
         </>
       ) : null}
+
+      <CameraAngleDialog
+        isOpen={isCameraAngleOpen}
+        sourcePreviewUrl={cameraSourcePreviewUrl}
+        sourceWidth={cameraSourceSize.width}
+        sourceHeight={cameraSourceSize.height}
+        sourceLoading={cameraSourceLoading}
+        cameraView={cameraDraftView}
+        runStatus={cameraRunStatus}
+        generatedPreviewUrl={cameraGeneratedPreviewUrl}
+        error={cameraError}
+        onChangeView={setCameraDraftView}
+        onRun={() => void runCameraAngleGeneration()}
+        onClose={closeCameraAngleDialog}
+        onConfirm={completeCameraAngleDialog}
+        canRun={cameraCanRun}
+        canConfirm={cameraCanConfirm}
+      />
 
       {showSidebar ? (
         <aside className="canvas-workbench-sidebar">

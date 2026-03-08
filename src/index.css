@@ -531,7 +531,9 @@ button {
 .canvas-workbench-actionbar,
 .canvas-workbench-imaginebar,
 .generator-card-header,
-.generator-prompt-dock {
+.generator-prompt-dock,
+.camera-angle-overlay,
+.camera-angle-shell {
   pointer-events: auto;
 }
 
@@ -759,6 +761,452 @@ button {
   border-color: #7da5e6;
   background: #eef5ff;
   color: #1d4db4;
+}
+
+.camera-angle-action-trigger {
+  background: linear-gradient(135deg, #0f65d8 0%, #2d7cff 100%) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+}
+
+.camera-angle-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3600;
+  display: flex;
+  pointer-events: auto;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(242, 246, 252, 0.74);
+  backdrop-filter: blur(14px);
+}
+
+.camera-angle-shell {
+  width: min(1280px, calc(100vw - 40px));
+  pointer-events: auto;
+  max-height: calc(100vh - 40px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 20px;
+  border-radius: 28px;
+  border: 1px solid rgba(208, 219, 234, 0.96);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 255, 0.98) 100%);
+  box-shadow: 0 22px 60px rgba(18, 30, 56, 0.16);
+  overflow: hidden;
+}
+
+.camera-angle-stage {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: radial-gradient(circle at 12% 0%, #eef6ff 0%, transparent 34%),
+    linear-gradient(180deg, #fbfdff 0%, #f4f7fc 100%);
+}
+
+.camera-angle-stage__header,
+.camera-angle-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.camera-angle-stage__eyebrow,
+.camera-angle-panel__eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0f65d8;
+}
+
+.camera-angle-stage__header h2,
+.camera-angle-panel__header h3 {
+  margin: 4px 0 0;
+  color: #16233c;
+}
+
+.camera-angle-stage__size {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: #eef4ff;
+  color: #2258ba;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.camera-angle-stage__viewport {
+  position: relative;
+  min-height: 480px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+  border: 1px solid #dae4f2;
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+  overflow: hidden;
+}
+
+.camera-angle-stage__viewport img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: linear-gradient(180deg, #edf3fc 0%, #f8fbff 100%);
+}
+
+.camera-angle-stage__badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(208, 219, 234, 0.96);
+  color: #2a3c63;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.camera-angle-stage__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(247, 250, 255, 0.72);
+  color: #203050;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.camera-angle-stage__empty {
+  color: #6c7b96;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.camera-angle-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 3px solid rgba(15, 101, 216, 0.14);
+  border-top-color: #0f65d8;
+  animation: camera-angle-spin 0.78s linear infinite;
+}
+
+@keyframes camera-angle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.camera-angle-stage__filmstrip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.camera-angle-film-card,
+.camera-angle-source-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #dde6f2;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 12px;
+}
+
+.camera-angle-film-card span:first-child {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #51627f;
+}
+
+.camera-angle-film-card img,
+.camera-angle-source-card img,
+.camera-angle-film-card div,
+.camera-angle-source-card > div:first-child {
+  width: 88px;
+  height: 88px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  object-fit: cover;
+  background: #edf2fa;
+  border: 1px solid #d4dff0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #66748c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.camera-angle-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px 22px 22px;
+  border-left: 1px solid rgba(220, 228, 240, 0.96);
+  background: rgba(250, 252, 255, 0.96);
+  overflow: auto;
+}
+
+.camera-angle-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid #d6e0ef;
+  border-radius: 12px;
+  background: #fff;
+  color: #42516a;
+  font-size: 16px;
+}
+
+.camera-angle-close:hover {
+  background: #f3f7fd;
+}
+
+.camera-angle-source-card strong {
+  display: block;
+  color: #18253d;
+}
+
+.camera-angle-source-card p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #647089;
+}
+
+.camera-angle-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.camera-angle-summary span {
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #eef4ff;
+  border: 1px solid #d7e4fb;
+  color: #2258ba;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.camera-angle-axis-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.camera-angle-axis-card,
+.camera-angle-gizmo-card {
+  border: 1px solid #dde6f2;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 14px;
+}
+
+.camera-angle-axis-card__header,
+.camera-angle-gizmo-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.camera-angle-axis-card__header strong,
+.camera-angle-gizmo-card__header strong {
+  color: #17243b;
+}
+
+.camera-angle-axis-card__header span,
+.camera-angle-gizmo-card__header span {
+  font-size: 12px;
+  color: #62708a;
+}
+
+.camera-angle-axis-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.camera-angle-axis-row button {
+  border: 1px solid #d8e1ee;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: #fff;
+  color: #243858;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.camera-angle-axis-row button:hover,
+.camera-angle-axis-row button.is-active {
+  border-color: #82a9ea;
+  background: #eef5ff;
+  color: #1e53ba;
+}
+
+.camera-angle-gizmo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.camera-angle-orbit-wrap,
+.camera-angle-depth {
+  position: relative;
+  border: 1px solid #dce5f3;
+  border-radius: 20px;
+  background: radial-gradient(circle at 50% 38%, #f8fbff 0%, #eef4fb 60%, #e8eef8 100%);
+}
+
+.camera-angle-orbit-wrap {
+  min-height: 244px;
+  overflow: hidden;
+}
+
+.camera-angle-three-preview {
+  position: relative;
+  width: 100%;
+  height: 244px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.camera-angle-three-preview:active {
+  cursor: grabbing;
+}
+
+.camera-angle-three-preview canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.camera-angle-three-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(208, 219, 234, 0.96);
+  color: #415575;
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.camera-angle-depth {
+  min-height: 244px;
+  padding: 12px 0;
+  cursor: ns-resize;
+}
+
+.camera-angle-depth__track {
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  bottom: 18px;
+  width: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff84bb 0%, #7f8cff 100%);
+}
+
+.camera-angle-depth__knob {
+  position: absolute;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  border: 3px solid #2d7cff;
+  box-shadow: 0 6px 16px rgba(45, 124, 255, 0.22);
+}
+
+.camera-angle-depth__label {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #647089;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.camera-angle-depth__label.is-bottom {
+  top: auto;
+  bottom: 10px;
+}
+
+.camera-angle-status {
+  margin: 0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: #f3f7fd;
+  color: #2f3a52;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.camera-angle-status.is-error {
+  background: #fff4f4;
+  color: #b42318;
+}
+
+.camera-angle-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.camera-angle-actions button {
+  flex: 1;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 700;
+}
+
+.camera-angle-run,
+.camera-angle-confirm {
+  color: #ffffff;
+}
+
+.camera-angle-run {
+  background: linear-gradient(135deg, #0f65d8 0%, #2d7cff 100%);
+}
+
+.camera-angle-confirm {
+  background: linear-gradient(135deg, #0b8a6a 0%, #0ea679 100%);
+}
+
+.camera-angle-secondary {
+  background: #edf1f7;
+  color: #32435f;
+}
+
+.camera-angle-actions button[disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .canvas-workbench-imaginebar {
@@ -1282,6 +1730,19 @@ button {
   .generator-prompt-dock {
     width: min(560px, calc(100vw - 32px)) !important;
   }
+
+  .camera-angle-shell {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    width: min(1180px, calc(100vw - 24px));
+  }
+
+  .camera-angle-stage {
+    padding: 18px;
+  }
+
+  .camera-angle-panel {
+    padding: 18px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1319,6 +1780,47 @@ button {
   .generator-prompt-actions select,
   .generator-prompt-actions button {
     flex: 1;
+  }
+
+  .camera-angle-overlay {
+    padding: 12px;
+  }
+
+  .camera-angle-shell {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .camera-angle-stage {
+    min-height: 0;
+    padding: 16px;
+  }
+
+  .camera-angle-stage__viewport {
+    min-height: 320px;
+  }
+
+  .camera-angle-stage__filmstrip {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-angle-panel {
+    border-left: 0;
+    border-top: 1px solid rgba(220, 228, 240, 0.96);
+    padding: 16px;
+  }
+
+  .camera-angle-gizmo {
+    grid-template-columns: minmax(0, 1fr) 38px;
+  }
+
+  .camera-angle-actions {
+    flex-wrap: wrap;
+  }
+
+  .camera-angle-actions button {
+    min-width: calc(50% - 5px);
   }
 
   .canvas-workbench-sidebar {
