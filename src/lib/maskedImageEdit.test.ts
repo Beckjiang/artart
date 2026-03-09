@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   blurMaskAlpha,
+  buildPointMarkerEditPrompt,
   buildSemanticMaskPrompt,
   compositeMaskedRegion,
+  createPointMarkerMaskStrokes,
   expandMaskBounds,
   findMaskBounds,
 } from './maskedImageEdit'
@@ -88,12 +90,7 @@ describe('compositeMaskedRegion', () => {
       patch[index + 3] = 255
     }
 
-    const maskAlpha = new Uint8ClampedArray([
-      255,
-      0,
-      0,
-      0,
-    ])
+    const maskAlpha = new Uint8ClampedArray([255, 0, 0, 0])
 
     const composed = compositeMaskedRegion({
       baseImage: {
@@ -115,9 +112,9 @@ describe('compositeMaskedRegion', () => {
       },
     })
 
-    const maskedPixel = ((1 * 4 + 1) * 4)
-    const untouchedPixel = ((1 * 4 + 2) * 4)
-    const outsidePixel = ((0 * 4 + 0) * 4)
+    const maskedPixel = (1 * 4 + 1) * 4
+    const untouchedPixel = (1 * 4 + 2) * 4
+    const outsidePixel = 0
 
     expect(Array.from(composed.data.slice(maskedPixel, maskedPixel + 4))).toEqual([200, 10, 20, 255])
     expect(Array.from(composed.data.slice(untouchedPixel, untouchedPixel + 4))).toEqual([10, 20, 30, 255])
@@ -131,5 +128,51 @@ describe('buildSemanticMaskPrompt', () => {
 
     expect(prompt).toContain('第 2 张中高亮的洋红区域是唯一允许修改的区域')
     expect(prompt).toContain('用户要求：把高亮区域里的 logo 换成极简风格')
+  })
+})
+
+describe('buildPointMarkerEditPrompt', () => {
+  it('adds marker-specific editing constraints', () => {
+    const prompt = buildPointMarkerEditPrompt('将[标注1]改为一个苹果', ['[标注1]'])
+
+    expect(prompt).toContain('你将收到三张局部参考图')
+    expect(prompt).toContain('仅修改用户明确引用的 [标注N] 附近区域')
+    expect(prompt).toContain('本次允许修改的标注：[标注1]')
+    expect(prompt).toContain('用户要求：将[标注1]改为一个苹果')
+  })
+})
+
+describe('createPointMarkerMaskStrokes', () => {
+  it('turns point markers into single-point paint strokes', () => {
+    const strokes = createPointMarkerMaskStrokes(
+      [
+        {
+          id: 1,
+          normalizedX: 0.25,
+          normalizedY: 0.5,
+          token: '[标注1]',
+        },
+        {
+          id: 2,
+          normalizedX: 0.75,
+          normalizedY: 0.2,
+          token: '[标注2]',
+        },
+      ],
+      800,
+      600
+    )
+
+    expect(strokes).toHaveLength(2)
+    expect(strokes[0]).toMatchObject({
+      mode: 'paint',
+      points: [{ x: 0.25, y: 0.5 }],
+    })
+    expect(strokes[1]).toMatchObject({
+      mode: 'paint',
+      points: [{ x: 0.75, y: 0.2 }],
+    })
+    expect(strokes[0]?.sizeRatio).toBeGreaterThan(0)
+    expect(strokes[0]?.sizeRatio).toBe(strokes[1]?.sizeRatio)
   })
 })

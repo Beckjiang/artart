@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   FormEvent,
@@ -16,7 +16,7 @@ import {
   useTools,
   useValue,
 } from 'tldraw'
-import type { TLImageShape, TLImageShapeProps } from 'tldraw'
+import type { TLImageShape, TLImageShapeProps, TLShapeId } from 'tldraw'
 import { archiveDebugImages } from '../lib/debugImageArchive'
 import { deleteBoard, renameBoard, touchBoard } from '../lib/boards'
 import type { BoardMeta } from '../lib/boards'
@@ -57,6 +57,27 @@ import type {
   MaskStrokeMode,
   NormalizedMaskStroke,
 } from '../lib/maskedImageEdit'
+import { WorkbenchChatPanel } from './WorkbenchChatPanel'
+import {
+  buildSessionEventsUrl,
+  createAgentAsset,
+  fetchSessionMessages,
+  sendAgentMessage,
+} from '../lib/agentChatClient'
+import { applyAgentStreamEvent, getChatStatusSummary, upsertChatMessage } from '../lib/agentChatState'
+import {
+  buildComposerSelectionDraft,
+  buildLegacyChatPrompt,
+  buildSelectionContext,
+} from '../lib/agentChatSelection'
+import type {
+  AgentStreamEvent,
+  CanvasInsertHint,
+  ChatAttachment,
+  ChatMessage,
+  ChatSelectionContext,
+  ChatSession,
+} from '../lib/agentChatTypes'
 
 const INSERT_GAP = 40
 const MAX_TASKS = 16
@@ -753,6 +774,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const [cameraGeneratedMimeType, setCameraGeneratedMimeType] = useState<string | null>(null)
   const [cameraError, setCameraError] = useState('')
   const [cameraAbortController, setCameraAbortController] = useState<AbortController | null>(null)
+  const [, setChatSession] = useState<ChatSession | null>(null)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatLoading, setChatLoading] = useState(true)
+  const [chatError, setChatError] = useState('')
+  const [chatSubmitting, setChatSubmitting] = useState(false)
+  const [chatRunId, setChatRunId] = useState<string | null>(null)
+  const [dismissedSelectionKey, setDismissedSelectionKey] = useState<string | null>(null)
   const [maskEnabled, setMaskEnabled] = useState(false)
   const [showMaskOverlay, setShowMaskOverlay] = useState(true)
   const [maskTool, setMaskTool] = useState<MaskStrokeMode>('paint')
@@ -770,6 +798,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const tasksRef = useRef<GenerationTask[]>(tasks)
   const cameraAbortControllerRef = useRef<AbortController | null>(null)
   const cameraAngleSessionRef = useRef(0)
+  const chatEventSourceRef = useRef<EventSource | null>(null)
   const activeMaskPointerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -809,16 +838,16 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     'workbench-selection-state',
     () => {
       const selectedShapes = editor.getSelectedShapes()
+      const selectedImageShapes = selectedShapes.filter(
+        (shape): shape is TLImageShape => shape.type === 'image'
+      )
       const selectedShapeIds = editor.getSelectedShapeIds()
       const onlySelectedShape = editor.getOnlySelectedShape()
       const selectedImage = getSingleSelectedImage(onlySelectedShape)
       const selectedCount = selectedShapeIds.length
-      const hasAnySelectedImage = selectedShapes.some((shape) => shape.type === 'image')
+      const hasAnySelectedImage = selectedImageShapes.length > 0
       const firstSelectedImage = getSelectionImagineSourceImage(
-        selectedShapes.flatMap((shape) => {
-          if (shape.type !== 'image') return []
-
-          const imageShape = shape as TLImageShape
+        selectedImageShapes.flatMap((imageShape) => {
           return [
             {
               shapeId: imageShape.id,
@@ -855,7 +884,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       return {
         selectedShapeIds,
+        selectedImageShapeIds: selectedImageShapes.map((shape) => shape.id),
         selectedCount,
+        selectedImageCount: selectedImageShapes.length,
         hasAnySelectedImage,
         firstSelectedImage,
         hasSelectedGeneratorCard,
@@ -880,8 +911,24 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [selectionState.selectedShapeIds]
   )
   const selectedGeneratorImage = assistantMode === 'image-generator' ? selectedImage : null
-  const showSidebar = assistantMode === 'image-edit' || assistantMode === 'disabled'
-  const selectedSidebarImage = showSidebar ? selectedImage : null
+  const selectedChatImage = useMemo(() => {
+    if (selectedImage && !selectionState.isGeneratorCard) {
+      return selectedImage
+    }
+
+    if (selectionState.firstSelectedImage?.shapeId) {
+      const shape = editor.getShape<TLImageShape>(selectionState.firstSelectedImage.shapeId as TLImageShape['id'])
+      if (shape && !isGeneratorShape(shape)) {
+        return shape
+      }
+    }
+
+    return null
+  }, [editor, selectedImage, selectionState.firstSelectedImage, selectionState.isGeneratorCard])
+  const hasDesktopSidebar = typeof window === 'undefined' ? true : window.innerWidth > 720
+  const showSidebar = hasDesktopSidebar
+  const selectedSidebarImage =
+    assistantMode === 'image-edit' || assistantMode === 'disabled' ? selectedImage : null
   const selectionNeedsImagineImage =
     assistantMode === 'disabled' &&
     selectionState.selectedCount > 1 &&
@@ -938,10 +985,86 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const generatorImageModel = resolvedGeneratorMeta?.imageModel ?? DEFAULT_GENERATOR_IMAGE_MODEL
   const generatorImageSize = resolvedGeneratorMeta?.imageSize ?? DEFAULT_GENERATOR_IMAGE_SIZE
   const activePresetDefinition = ACTION_PRESETS[activePreset]
+  const composerSelectionDraft = useMemo(() => {
+    if (dismissedSelectionKey === selectedShapeIdsKey) {
+      return null
+    }
+
+    const selectionBounds = selectionState.selectionPageBounds
+      ? {
+          x: selectionState.selectionPageBounds.x,
+          y: selectionState.selectionPageBounds.y,
+          width: selectionState.selectionPageBounds.w,
+          height: selectionState.selectionPageBounds.h,
+          minY: selectionState.selectionPageBounds.minY,
+          maxX: selectionState.selectionPageBounds.maxX,
+        }
+      : null
+
+    const insertHint: CanvasInsertHint | null =
+      selectionState.selectedCount === 1 && selectedChatImage
+        ? {
+            mode: 'image-edit',
+            sourceShapeId: selectedChatImage.id,
+            outputWidth: Math.round(selectedChatImage.props.w),
+            outputHeight: Math.round(selectedChatImage.props.h),
+          }
+        : selectionState.selectedCount > 1 && selectionState.firstSelectedImage
+          ? {
+              mode: 'selection-imagine',
+              selectionBounds,
+              outputWidth: Math.round(selectionState.firstSelectedImage.width),
+              outputHeight: Math.round(selectionState.firstSelectedImage.height),
+            }
+          : null
+
+    return buildComposerSelectionDraft({
+      boardId: board.id,
+      selectedShapeIds: selectionState.selectedShapeIds,
+      selectedImageShapeIds: selectionState.selectedImageShapeIds,
+      selectedCount: selectionState.selectedCount,
+      selectedImageCount: selectionState.selectedImageCount,
+      sourceShapeId: selectedChatImage?.id ?? null,
+      previewUrl: selectionState.selectedCount === 1 ? selectedPreviewSrc : undefined,
+      selectionBounds,
+      insertHint,
+    })
+  }, [
+    board.id,
+    dismissedSelectionKey,
+    selectedChatImage,
+    selectedPreviewSrc,
+    selectedShapeIdsKey,
+    selectionState.firstSelectedImage,
+    selectionState.selectedCount,
+    selectionState.selectedImageCount,
+    selectionState.selectedImageShapeIds,
+    selectionState.selectedShapeIds,
+    selectionState.selectionPageBounds,
+  ])
+  const chatStatusSummary = useMemo(() => getChatStatusSummary(chatMessages), [chatMessages])
+  const chatStatusText = chatSubmitting ? '正在发送消息…' : chatStatusSummary
+  const chatComposerPlaceholder = useMemo(() => {
+    if (assistantMode === 'selection-imagine') {
+      return '描述你想基于当前选区生成什么内容'
+    }
+
+    if (composerSelectionDraft?.kind === 'single-image') {
+      return activePresetDefinition.placeholder
+    }
+
+    return '请输入你的设计需求'
+  }, [activePresetDefinition.placeholder, assistantMode, composerSelectionDraft?.kind])
+  const canSubmitChat = Boolean(
+    (sidebarPrompt.trim() || composerSelectionDraft) && !chatRunId && !chatSubmitting
+  )
   const canSubmitSidebarPrompt = assistantMode === 'image-edit'
   const canGenerateSidebar = canSubmitSidebarPrompt && !!sidebarPrompt.trim()
   const generatorBusy =
-    selectedGeneratorTask?.status === 'queued' || selectedGeneratorTask?.status === 'running'
+    selectedGeneratorTask?.status === 'queued' ||
+    selectedGeneratorTask?.status === 'running' ||
+    Boolean(chatRunId) ||
+    chatSubmitting
   const canGenerateFromCard = Boolean(selectedGeneratorImage && generatorPrompt.trim() && !generatorBusy)
   const cameraCanRun =
     isCameraAngleOpen &&
@@ -1602,6 +1725,410 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       })
     },
     [editor]
+  )
+
+  const replaceImageShapeAsset = useCallback(
+    ({
+      shapeId,
+      name,
+      imageUrl,
+      mimeType,
+      width,
+      height,
+      altText,
+      meta,
+    }: {
+      shapeId: TLImageShape['id']
+      name: string
+      imageUrl: string
+      mimeType?: string | null
+      width: number
+      height: number
+      altText?: string
+      meta?: ShapeMeta
+    }) => {
+      if (!editor.getShape(shapeId)) return null
+
+      const imageAsset = AssetRecordType.create({
+        id: AssetRecordType.createId(),
+        type: 'image',
+        props: {
+          name,
+          src: imageUrl,
+          w: width,
+          h: height,
+          mimeType: mimeType || 'image/png',
+          isAnimated: false,
+        },
+      })
+
+      editor.run(() => {
+        editor.createAssets([imageAsset])
+        editor.updateShapes<TLImageShape>([
+          {
+            id: shapeId,
+            type: 'image',
+            ...(meta ? { meta } : {}),
+            props: {
+              assetId: imageAsset.id,
+              w: width,
+              h: height,
+              altText,
+            },
+          },
+        ])
+      })
+
+      return shapeId
+    },
+    [editor]
+  )
+
+  const insertGeneratedImageFromChat = useCallback(
+    ({
+      attachment,
+      insertHint,
+    }: {
+      attachment: ChatAttachment
+      insertHint: CanvasInsertHint
+    }) => {
+      const width = Math.max(64, Math.round(attachment.width ?? 1024))
+      const height = Math.max(64, Math.round(attachment.height ?? 1024))
+      const imageUrl = attachment.previewUrl || attachment.dataUrl
+      if (!imageUrl) return null
+
+      if (insertHint.mode === 'generator-card' && insertHint.targetShapeId) {
+        const replaced = replaceImageShapeAsset({
+          shapeId: insertHint.targetShapeId as TLImageShape['id'],
+          name: attachment.name,
+          imageUrl,
+          mimeType: attachment.mimeType,
+          width: Math.max(64, Math.round(insertHint.width)),
+          height: Math.max(64, Math.round(insertHint.height)),
+          altText: attachment.name,
+          meta: {
+            canvasRole: GENERATED_IMAGE_ROLE,
+          },
+        })
+        if (replaced) {
+          selectAndRevealShape(replaced)
+          return replaced
+        }
+      }
+
+      if (insertHint.mode === 'image-edit' && insertHint.sourceShapeId) {
+        const sourceShape = editor.getShape<TLImageShape>(insertHint.sourceShapeId as TLImageShape['id'])
+        const sourceBounds = sourceShape ? editor.getShapePageBounds(sourceShape) : null
+        if (sourceShape) {
+          const placement = getInsertPlacement('image-edit', {
+            viewportBounds: editor.getViewportPageBounds(),
+            selectedImage: {
+              shapeId: sourceShape.id,
+              x: sourceShape.x,
+              y: sourceShape.y,
+              width: sourceShape.props.w,
+              height: sourceShape.props.h,
+              bounds: sourceBounds
+                ? {
+                    minY: sourceBounds.minY,
+                    maxX: sourceBounds.maxX,
+                  }
+                : undefined,
+            },
+            insertGap: INSERT_GAP,
+          })
+
+          const shapeId = createImageShape({
+            name: attachment.name,
+            imageUrl,
+            mimeType: attachment.mimeType,
+            width: placement.width,
+            height: placement.height,
+            x: placement.insertX,
+            y: placement.insertY,
+            altText: attachment.name,
+          })
+          selectAndRevealShape(shapeId)
+          return shapeId
+        }
+      }
+
+      if (insertHint.mode === 'selection-imagine' && insertHint.selectionBounds) {
+        const placement = getInsertPlacement('selection-imagine', {
+          viewportBounds: editor.getViewportPageBounds(),
+          selectionBounds: insertHint.selectionBounds,
+          selectionOutputSize: {
+            width: insertHint.outputWidth ?? width,
+            height: insertHint.outputHeight ?? height,
+          },
+          insertGap: INSERT_GAP,
+        })
+
+        const shapeId = createImageShape({
+          name: attachment.name,
+          imageUrl,
+          mimeType: attachment.mimeType,
+          width: placement.width,
+          height: placement.height,
+          x: placement.insertX,
+          y: placement.insertY,
+          altText: attachment.name,
+        })
+        selectAndRevealShape(shapeId)
+        return shapeId
+      }
+
+      const viewportBounds = editor.getViewportPageBounds()
+      const centeredX = Math.round(viewportBounds.x + viewportBounds.w / 2 - width / 2)
+      const centeredY = Math.round(viewportBounds.y + viewportBounds.h / 2 - height / 2)
+      const shapeId = createImageShape({
+        name: attachment.name,
+        imageUrl,
+        mimeType: attachment.mimeType,
+        width,
+        height,
+        x: insertHint.mode === 'generator-card' ? insertHint.x : centeredX,
+        y: insertHint.mode === 'generator-card' ? insertHint.y : centeredY,
+        altText: attachment.name,
+      })
+      selectAndRevealShape(shapeId)
+      return shapeId
+    },
+    [createImageShape, editor, replaceImageShapeAsset, selectAndRevealShape]
+  )
+
+  const handleLocateChatAttachment = useCallback(
+    (attachment: ChatAttachment) => {
+      if (!attachment.canvasShapeId) return
+      selectAndRevealShape(attachment.canvasShapeId as TLImageShape['id'])
+    },
+    [selectAndRevealShape]
+  )
+
+  const handleReuseChatAttachment = useCallback(
+    (attachment: ChatAttachment) => {
+      if (!attachment.canvasShapeId) return
+      const shape = editor.getShape<TLImageShape>(attachment.canvasShapeId as TLImageShape['id'])
+      if (!shape) return
+      editor.setSelectedShapes([shape.id])
+      focusSidebarPromptInput()
+    },
+    [editor, focusSidebarPromptInput]
+  )
+
+  const handleAgentEvent = useCallback(
+    (event: AgentStreamEvent) => {
+      setChatMessages((previous) => applyAgentStreamEvent(previous, event))
+
+      if (event.type === 'message.started') {
+        setChatRunId(event.runId)
+        return
+      }
+
+      if (event.type === 'canvas.result.created') {
+        const canvasShapeId = insertGeneratedImageFromChat({
+          attachment: event.attachment,
+          insertHint: event.insertHint,
+        })
+
+        if (canvasShapeId) {
+          setChatMessages((previous) =>
+            previous.map((message) => {
+              if (message.id !== event.messageId) return message
+              return {
+                ...message,
+                attachments: message.attachments.map((attachment) =>
+                  attachment.id === event.attachment.id
+                    ? {
+                        ...attachment,
+                        canvasShapeId,
+                      }
+                    : attachment
+                ),
+              }
+            })
+          )
+        }
+        return
+      }
+
+      if (event.type === 'message.completed' || event.type === 'run.failed') {
+        setChatRunId(null)
+      }
+    },
+    [insertGeneratedImageFromChat]
+  )
+
+  useEffect(() => {
+    let disposed = false
+    setChatLoading(true)
+    setChatError('')
+
+    void fetchSessionMessages(board.id)
+      .then((response) => {
+        if (disposed) return
+        setChatSession(response.session)
+        setChatMessages(response.messages)
+      })
+      .catch((error) => {
+        if (disposed) return
+        setChatError(error instanceof Error ? error.message : '加载会话失败')
+      })
+      .finally(() => {
+        if (disposed) return
+        setChatLoading(false)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [board.id])
+
+  useEffect(() => {
+    chatEventSourceRef.current?.close()
+    const eventSource = new EventSource(buildSessionEventsUrl(board.id))
+    chatEventSourceRef.current = eventSource
+
+    eventSource.onmessage = (event) => {
+      try {
+        handleAgentEvent(JSON.parse(event.data) as AgentStreamEvent)
+      } catch {
+        // noop
+      }
+    }
+
+    eventSource.onerror = () => {
+      // EventSource 会自动重连，这里不主动打断创作流程
+    }
+
+    return () => {
+      eventSource.close()
+      if (chatEventSourceRef.current === eventSource) {
+        chatEventSourceRef.current = null
+      }
+    }
+  }, [board.id, handleAgentEvent])
+
+  const sendChatTurn = useCallback(
+    async ({
+      promptText,
+      selectionDraft,
+      insertHint,
+    }: {
+      promptText?: string
+      selectionDraft?: typeof composerSelectionDraft
+      insertHint?: CanvasInsertHint | null
+    } = {}) => {
+      const nextPrompt = (promptText ?? sidebarPrompt).trim()
+      const nextSelectionDraft = selectionDraft ?? composerSelectionDraft
+      const hasPayload = Boolean(nextPrompt) || Boolean(nextSelectionDraft)
+
+      if (!hasPayload) {
+        return '请先输入提示，或附带当前选区。'
+      }
+
+      if (chatRunId || chatSubmitting) {
+        return '当前已有任务在处理中，请稍候。'
+      }
+
+      setChatError('')
+      setChatSubmitting(true)
+
+      let uploadedAssetId: string | null = null
+
+      try {
+        if (nextSelectionDraft?.kind === 'single-image' && selectedChatImage) {
+          const snapshot = await exportSelectedImageSnapshot(selectedChatImage)
+          const { asset } = await createAgentAsset({
+            boardId: board.id,
+            name: 'selected-image',
+            kind: 'selection-image',
+            mimeType: snapshot.mimeType,
+            previewUrl: selectedPreviewSrc || snapshot.imageUrl,
+            dataUrl: snapshot.imageUrl,
+            width: snapshot.width,
+            height: snapshot.height,
+            shapeId: selectedChatImage.id,
+          })
+          uploadedAssetId = asset.id
+        }
+
+        if (nextSelectionDraft?.kind === 'selection-with-images') {
+          const exported = await editor.toImage(nextSelectionDraft.selectedShapeIds as TLShapeId[], {
+            format: 'png',
+          })
+          const imageUrl = await blobToDataUrl(exported.blob)
+          const dimensions = await getImageDimensions(imageUrl)
+          const { asset } = await createAgentAsset({
+            boardId: board.id,
+            name: 'selection-composite',
+            kind: 'selection-image',
+            mimeType: 'image/png',
+            previewUrl: imageUrl,
+            dataUrl: imageUrl,
+            width: dimensions.width,
+            height: dimensions.height,
+            shapeId: nextSelectionDraft.selectedImageShapeIds[0] ?? null,
+          })
+          uploadedAssetId = asset.id
+        }
+
+        let selectionContext: ChatSelectionContext | null = null
+
+        if (nextSelectionDraft) {
+          const builtSelectionContext = buildSelectionContext(
+            nextSelectionDraft,
+            board.id,
+            uploadedAssetId
+          )
+
+          if (builtSelectionContext) {
+            selectionContext = {
+              ...builtSelectionContext,
+              insertHint: insertHint ?? nextSelectionDraft.insertHint ?? null,
+            }
+          }
+        } else if (insertHint) {
+          selectionContext = {
+            boardId: board.id,
+            selectedShapeIds: [],
+            selectedImageShapeIds: [],
+            sourceKind: 'none',
+            insertHint,
+          }
+        }
+
+        const response = await sendAgentMessage(board.id, {
+          text: nextPrompt,
+          attachments: uploadedAssetId ? [{ assetId: uploadedAssetId }] : [],
+          selectionContext,
+          clientMessageId: createTaskId(),
+        })
+
+        setChatSession(response.session)
+        setChatRunId(response.runId)
+        setChatMessages((previous) => upsertChatMessage(previous, response.acceptedMessage))
+        setSidebarPrompt('')
+        setSidebarError('')
+        setChatSubmitting(false)
+        return null
+      } catch (error) {
+        setChatSubmitting(false)
+        setChatError(error instanceof Error ? error.message : '发送失败，请稍后重试。')
+        return '发送失败，请稍后重试。'
+      }
+    },
+    [
+      board.id,
+      chatRunId,
+      chatSubmitting,
+      composerSelectionDraft,
+      editor,
+      exportSelectedImageSnapshot,
+      selectedChatImage,
+      selectedPreviewSrc,
+      sidebarPrompt,
+    ]
   )
 
   const openCameraAngleDialog = useCallback(async () => {
@@ -2522,6 +3049,12 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [enqueueGeneratorTask]
   )
 
+  const handleSidebarPromptChange = useCallback((nextValue: string) => {
+    setSidebarPrompt(nextValue)
+    setSidebarError('')
+    setChatError('')
+  }, [])
+
   const handleSidebarPromptKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key === 'Enter' && !event.shiftKey) {
@@ -2718,6 +3251,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
     return '还没有任务。先创建一个图片编辑任务。'
   }, [assistantMode, selectionNeedsImagineImage])
+
+  const selectionImagineBusy = selectionImaginePending || Boolean(chatRunId) || chatSubmitting
 
   const presetHelperText = assistantMode === 'disabled' ? selectionMessage : activePresetDefinition.helper
   const canUseMaskEditor = assistantMode === 'image-edit' && Boolean(selectedImagePreview)
@@ -3004,9 +3539,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             type="button"
             onClick={() => void enqueueSelectionImagineTask()}
             onMouseDown={handleToolbarMouseDown}
-            disabled={selectionImaginePending}
+            disabled={selectionImagineBusy}
           >
-            {selectionImaginePending ? 'Imagining…' : 'imagine'}
+            {selectionImagineBusy ? 'Imagining…' : 'imagine'}
           </button>
           {selectionImagineError ? (
             <p className="canvas-workbench-imagine-status is-error">{selectionImagineError}</p>
@@ -3157,6 +3692,27 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       {showSidebar ? (
         <aside className="canvas-workbench-sidebar">
+          <WorkbenchChatPanel
+            boardTitle={board.title}
+            messages={chatMessages}
+            loading={chatLoading}
+            composerValue={sidebarPrompt}
+            composerPlaceholder={chatComposerPlaceholder}
+            composerDisabled={Boolean(chatRunId || chatSubmitting)}
+            canSubmit={canSubmitChat}
+            selectionDraft={composerSelectionDraft}
+            statusText={chatStatusText}
+            error={sidebarError || chatError}
+            onComposerChange={handleSidebarPromptChange}
+            onComposerKeyDown={handleSidebarPromptKeyDown}
+            onSubmit={handleSidebarFormSubmit}
+            onRemoveSelectionDraft={() => setDismissedSelectionKey(selectedShapeIdsKey || '__empty__')}
+            onLocateAttachment={handleLocateChatAttachment}
+            onReuseAttachment={handleReuseChatAttachment}
+            inputRef={sidebarPromptInputRef}
+          />
+
+          <div hidden aria-hidden="true">
           <div className="workbench-sidebar-header">
             <div>
               <p className="eyebrow">Agent</p>
@@ -3398,6 +3954,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             <p className="workbench-submit-hint">Enter 提交，Shift + Enter 换行</p>
             {sidebarError ? <p className="image-prompt-error">{sidebarError}</p> : null}
           </form>
+          </div>
         </aside>
       ) : null}
     </div>

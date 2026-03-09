@@ -4,6 +4,7 @@ import path from 'node:path'
 import { defineConfig } from 'vite'
 import type { Connect, ViteDevServer, PreviewServer } from 'vite'
 import react from '@vitejs/plugin-react'
+import { localAgentPlugin } from './server/agent/vitePlugin'
 
 type DebugImageItem = {
   label: string
@@ -224,7 +225,7 @@ const localDebugImagePlugin = () => {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), localDebugImagePlugin()],
+  plugins: [react(), localDebugImagePlugin(), localAgentPlugin()],
   server: {
     proxy: {
       '/api/gemini': {

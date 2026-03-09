@@ -1871,6 +1871,144 @@ button {
   opacity: 0.6;
 }
 
+.canvas-workbench-marker-layer {
+  position: fixed;
+  z-index: 2400;
+  pointer-events: none;
+}
+
+.canvas-workbench-marker-hitarea {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  pointer-events: none;
+}
+
+.canvas-workbench-marker-hitarea.is-armed {
+  pointer-events: auto;
+  cursor: crosshair;
+  background: rgba(15, 101, 216, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(15, 101, 216, 0.2);
+}
+
+.canvas-workbench-marker-badge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(15, 101, 216, 0.96);
+  border: 2px solid #fff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(18, 30, 56, 0.18);
+  pointer-events: none;
+}
+
+.canvas-workbench-sidebar {
+  gap: 14px;
+  padding: 14px;
+  overflow: auto;
+}
+
+.workbench-selection-card {
+  gap: 8px;
+  padding: 10px;
+  border-radius: 18px;
+}
+
+.workbench-selection-preview {
+  max-height: 220px;
+}
+
+.workbench-marker-hint {
+  margin: 0;
+  color: #54657f;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.workbench-prompt-form {
+  gap: 8px;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.workbench-prompt-form textarea {
+  min-height: 138px;
+}
+
+.workbench-prompt-actions button {
+  width: 100%;
+}
+
+.workbench-submit-hint {
+  margin-top: 0;
+}
+
+.camera-angle-shell {
+  width: min(1320px, calc(100vw - 40px));
+  grid-template-columns: minmax(0, 1fr) 400px;
+}
+
+.camera-angle-panel {
+  gap: 12px;
+  padding: 20px;
+}
+
+.camera-angle-panel__hint {
+  margin: -2px 0 0;
+  color: #61708a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.camera-angle-axis-list {
+  gap: 10px;
+}
+
+.camera-angle-axis-card--compact {
+  padding: 12px;
+  border-radius: 16px;
+}
+
+.camera-angle-axis-label {
+  color: #62708a;
+  font-size: 11px;
+}
+
+.camera-angle-axis-row--tight {
+  gap: 6px;
+}
+
+.camera-angle-axis-row--tight button {
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+
+.camera-angle-gizmo-card--focus {
+  padding: 14px;
+}
+
+.camera-angle-orbit-wrap {
+  min-height: 320px;
+}
+
+.camera-angle-three-preview {
+  height: 320px;
+}
+
+.camera-angle-depth {
+  min-height: 320px;
+}
+
 @media (max-width: 1180px) {
   .canvas-workbench {
     --assistant-panel-width: 320px;

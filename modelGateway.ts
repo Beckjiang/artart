@@ -217,7 +217,7 @@ const parseJsonSafely = async (response: Response): Promise<Record<string, unkno
   }
 }
 
-const buildHeaders = (): HeadersInit => {
+const buildHeaders = (): Record<string, string> => {
   const apiKey = getEnvValue('OPENAI_API_KEY')
   if (!apiKey) {
     throw new Error('missing_api_key')

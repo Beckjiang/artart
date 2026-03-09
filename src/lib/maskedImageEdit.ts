@@ -1,3 +1,5 @@
+import type { EditMarker } from './imageEditMarkers'
+
 export type MaskStrokeMode = 'paint' | 'erase'
 
 export type NormalizedMaskPoint = {
@@ -34,6 +36,13 @@ type PrepareMaskedEditAssetsOptions = {
   signal?: AbortSignal
 }
 
+type PreparePointMarkerEditAssetsOptions = {
+  sourceImageUrl: string
+  markers: EditMarker[]
+  activeMarkerTokens: string[]
+  signal?: AbortSignal
+}
+
 type CompositeMaskedEditResultOptions = {
   baseImageUrl: string
   patchImageUrl: string
@@ -53,14 +62,25 @@ export type PreparedMaskedEditAssets = {
   fullMaskUrl: string
 }
 
+export type PreparedPointMarkerEditAssets = PreparedMaskedEditAssets & {
+  labeledCropUrl: string
+  activeMarkerTokens: string[]
+}
+
 export const MASK_PADDING_RATIO = 0.08
 export const MASK_PADDING_MIN = 24
 export const MASK_PADDING_MAX = 96
 export const MASK_MIN_CROP_EDGE = 96
 export const DEFAULT_MASK_FEATHER_PX = 2
+export const POINT_MARKER_RADIUS_RATIO = 0.12
+export const POINT_MARKER_MIN_RADIUS_PX = 24
+export const POINT_MARKER_MAX_RADIUS_PX = 90
 
 const HIGHLIGHT_OVERLAY = 'rgba(217, 70, 239, 0.45)'
 const MASK_PAINT_COLOR = 'rgba(255, 255, 255, 1)'
+const MARKER_BADGE_FILL = 'rgba(15, 101, 216, 0.94)'
+const MARKER_BADGE_STROKE = 'rgba(255, 255, 255, 0.96)'
+const MARKER_BADGE_TEXT = '#ffffff'
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
@@ -352,6 +372,132 @@ export const buildSemanticMaskPrompt = (prompt: string) => {
 
   const normalizedPrompt = prompt.trim()
   return normalizedPrompt ? `${basePrompt}\n用户要求：${normalizedPrompt}` : basePrompt
+}
+
+const getPointMarkerRadiusPx = (sourceWidth: number, sourceHeight: number) =>
+  clamp(
+    Math.round(Math.min(sourceWidth, sourceHeight) * POINT_MARKER_RADIUS_RATIO),
+    POINT_MARKER_MIN_RADIUS_PX,
+    POINT_MARKER_MAX_RADIUS_PX
+  )
+
+export const createPointMarkerMaskStrokes = (
+  markers: EditMarker[],
+  sourceWidth: number,
+  sourceHeight: number
+) => {
+  if (markers.length === 0) return []
+
+  const minEdge = Math.max(1, Math.min(sourceWidth, sourceHeight))
+  const brushSize = getPointMarkerRadiusPx(sourceWidth, sourceHeight) * 2
+  const sizeRatio = brushSize / minEdge
+
+  return markers.map((marker) => ({
+    mode: 'paint' as const,
+    sizeRatio,
+    points: [
+      {
+        x: clamp(marker.normalizedX, 0, 1),
+        y: clamp(marker.normalizedY, 0, 1),
+      },
+    ],
+  }))
+}
+
+export const buildPointMarkerEditPrompt = (prompt: string, activeMarkerTokens: string[]) => {
+  const markerLine = activeMarkerTokens.join('、')
+  const basePrompt = [
+    '你将收到三张局部参考图。',
+    '第 1 张是原始局部裁剪图。',
+    '第 2 张中高亮的洋红区域是允许修改的范围。',
+    '第 3 张是在同一局部图上叠加编号标注的参考图。',
+    '仅修改用户明确引用的 [标注N] 附近区域；每个 [标注N] 都对应第 3 张参考图中的同号标记。',
+    '不要修改未被引用的区域，不要改变主体身份、文字内容、构图、光影、风格和边缘连续性。',
+    '输出一张完整自然的局部编辑结果，不要额外添加边框、留白或新的标号。',
+    markerLine ? `本次允许修改的标注：${markerLine}` : '',
+  ]
+    .filter(Boolean)
+    .join('')
+
+  const normalizedPrompt = prompt.trim()
+  return normalizedPrompt ? `${basePrompt}\n用户要求：${normalizedPrompt}` : basePrompt
+}
+
+const drawMarkerBadge = (
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  label: string,
+  radius = 18
+) => {
+  context.save()
+  context.beginPath()
+  context.arc(x, y, radius, 0, Math.PI * 2)
+  context.fillStyle = MARKER_BADGE_FILL
+  context.fill()
+  context.lineWidth = 2
+  context.strokeStyle = MARKER_BADGE_STROKE
+  context.stroke()
+  context.fillStyle = MARKER_BADGE_TEXT
+  context.font = '700 16px Segoe UI, PingFang SC, sans-serif'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(label, x, y + 0.5)
+  context.restore()
+}
+
+export const preparePointMarkerEditAssets = async ({
+  sourceImageUrl,
+  markers,
+  activeMarkerTokens,
+  signal,
+}: PreparePointMarkerEditAssetsOptions): Promise<PreparedPointMarkerEditAssets> => {
+  const activeSet = new Set(activeMarkerTokens)
+  const activeMarkers = markers.filter((marker) => activeSet.has(marker.token))
+
+  if (activeMarkers.length === 0) {
+    throw new Error('请先按住 Alt 点击图片添加标注，或删除无效的 [标注N] 占位符')
+  }
+
+  const sourceImage = await loadImageElement(sourceImageUrl, signal)
+  const sourceWidth = Math.max(1, sourceImage.naturalWidth || sourceImage.width || 1)
+  const sourceHeight = Math.max(1, sourceImage.naturalHeight || sourceImage.height || 1)
+  const strokes = createPointMarkerMaskStrokes(activeMarkers, sourceWidth, sourceHeight)
+  const prepared = await prepareMaskedEditAssets({
+    sourceImageUrl,
+    strokes,
+    signal,
+  })
+
+  const labeledCropCanvas = createCanvas(prepared.maskBounds.width, prepared.maskBounds.height)
+  const labeledCropContext = labeledCropCanvas.getContext('2d')
+  if (!labeledCropContext) {
+    throw new Error('无法创建标注预览画布上下文')
+  }
+
+  labeledCropContext.drawImage(
+    sourceImage,
+    prepared.maskBounds.x,
+    prepared.maskBounds.y,
+    prepared.maskBounds.width,
+    prepared.maskBounds.height,
+    0,
+    0,
+    prepared.maskBounds.width,
+    prepared.maskBounds.height
+  )
+
+  for (const marker of activeMarkers) {
+    const x = clamp(marker.normalizedX, 0, 1) * sourceWidth - prepared.maskBounds.x
+    const y = clamp(marker.normalizedY, 0, 1) * sourceHeight - prepared.maskBounds.y
+    drawMarkerBadge(labeledCropContext, x, y, String(marker.id))
+  }
+
+  return {
+    ...prepared,
+    labeledCropUrl: canvasToDataUrl(labeledCropCanvas),
+    activeMarkerTokens: activeMarkers.map((marker) => marker.token),
+  }
 }
 
 export const drawMaskStrokes = (
