@@ -13,10 +13,34 @@ type RunImageToolParams = {
   referenceDataUrls?: string[]
 }
 
+type GeminiInlineData = {
+  mimeType?: string
+  mime_type?: string
+  data?: string
+}
+
+type GeminiPart = {
+  inlineData?: GeminiInlineData
+  inline_data?: GeminiInlineData
+}
+
+type GeminiResponsePayload = {
+  candidates?: Array<{ content?: { parts?: GeminiPart[] } }>
+  error?: {
+    message?: string
+    type?: string
+    code?: number
+  }
+}
+
 const IMAGE_MODEL_FALLBACK = 'gemini-3.1-flash-image-preview'
 const IMAGE_SIZE_FALLBACK = '2K'
 const GEMINI_API_VERSION_PATH = '/v1beta'
 const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
+const GEMINI_DEFAULT_ORIGIN = 'https://generativelanguage.googleapis.com'
+const DEV_PROXY_BASE_URL = '/api/gemini'
+const LEGACY_DEV_PROXY_BASE_URL = '/api/uniapi'
+const IMAGE_TO_IMAGE_FAILURE_MESSAGE = '\u56fe\u751f\u56fe\u670d\u52a1\u8c03\u7528\u5931\u8d25'
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
 
@@ -33,6 +57,66 @@ const ensureGeminiApiBaseUrl = (value: string) => {
   } catch {
     return normalized
   }
+}
+
+const isProxyBaseUrl = (baseUrl: string) => {
+  const normalized = normalizeBaseUrl(baseUrl)
+  return normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL
+}
+
+const isOfficialGeminiBaseUrl = (baseUrl: string) => {
+  if (isProxyBaseUrl(baseUrl)) return true
+
+  try {
+    const parsed = new URL(ensureGeminiApiBaseUrl(baseUrl))
+    return parsed.origin === GEMINI_DEFAULT_ORIGIN
+  } catch {
+    return false
+  }
+}
+
+const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string): Record<string, string> => {
+  if (isOfficialGeminiBaseUrl(baseUrl)) {
+    return {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    }
+  }
+
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${apiKey}`,
+  }
+}
+
+const isLikelyImageEditingUnsupported = (message: string) => {
+  const normalized = message.toLowerCase()
+  return (
+    message.includes(IMAGE_TO_IMAGE_FAILURE_MESSAGE) ||
+    normalized.includes('upstream_error') ||
+    normalized.includes('task failed')
+  )
+}
+
+const getInlineData = (part?: GeminiPart | null): GeminiInlineData | null =>
+  part?.inlineData || part?.inline_data || null
+
+const buildGeminiHttpError = (details: {
+  endpoint: string
+  status: number
+  requestId?: string | null
+  upstreamMessage?: string
+  rawPreview?: string
+}) => {
+  const segments = [
+    `Gemini image request failed (HTTP ${details.status})`,
+    details.endpoint ? `endpoint=${details.endpoint}` : '',
+    details.requestId ? `requestId=${details.requestId}` : '',
+    details.upstreamMessage ? `error=${details.upstreamMessage}` : '',
+    details.rawPreview ? `response=${details.rawPreview}` : '',
+  ].filter(Boolean)
+
+  return segments.join('. ')
 }
 
 const getHintWidth = (hint?: CanvasInsertHint | null) => {
@@ -131,7 +215,9 @@ const requestGeminiImage = async (
   }
 
   const baseUrl = ensureGeminiApiBaseUrl(
-    getEnvValue('VITE_GEMINI_BASE_URL') || getEnvValue('VITE_UNIAPI_BASE_URL') || GEMINI_DEFAULT_BASE_URL
+    getEnvValue('VITE_GEMINI_BASE_URL') ||
+      getEnvValue('VITE_UNIAPI_BASE_URL') ||
+      GEMINI_DEFAULT_BASE_URL
   )
   const imageModel = getEnvValue('VITE_GEMINI_IMAGE_MODEL') || IMAGE_MODEL_FALLBACK
   const imageSize = getEnvValue('VITE_GEMINI_IMAGE_SIZE') || IMAGE_SIZE_FALLBACK
@@ -152,8 +238,7 @@ const requestGeminiImage = async (
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
+      ...buildGeminiRequestHeaders(baseUrl, apiKey),
     },
     body: JSON.stringify({
       contents: [
@@ -161,7 +246,9 @@ const requestGeminiImage = async (
           role: 'user',
           parts: [
             {
-              text: prompt.trim() || (referenceParts.length > 0 ? 'Edit this image.' : 'Generate an image.'),
+              text:
+                prompt.trim() ||
+                (referenceParts.length > 0 ? 'Edit this image.' : 'Generate an image.'),
             },
             ...referenceParts,
           ],
@@ -177,23 +264,59 @@ const requestGeminiImage = async (
     }),
   })
 
-  const payload = (await response.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> } }>
-    error?: { message?: string }
+  const rawText = await response.text()
+  const requestId = response.headers.get('x-oneapi-request-id')
+
+  let payload: GeminiResponsePayload = {}
+  if (rawText.trim()) {
+    try {
+      payload = JSON.parse(rawText) as GeminiResponsePayload
+    } catch {
+      payload = {}
+    }
   }
 
   if (!response.ok) {
-    throw new Error(payload.error?.message || `gemini_http_${response.status}`)
+    const upstreamMessage = payload.error?.message?.trim() || ''
+    const rawPreview = rawText.trim().slice(0, 200)
+    const baseErrorMessage = upstreamMessage || rawPreview
+    const detailedMessage = buildGeminiHttpError({
+      endpoint,
+      status: response.status,
+      requestId,
+      upstreamMessage: upstreamMessage || undefined,
+      rawPreview: upstreamMessage ? undefined : rawPreview,
+    })
+
+    if (referenceParts.length > 0 && isLikelyImageEditingUnsupported(baseErrorMessage)) {
+      throw new Error(
+        `The gateway returned "${IMAGE_TO_IMAGE_FAILURE_MESSAGE}" for image-to-image. ` +
+          `This usually means ${baseUrl} (model: ${imageModel}) does not support reference-image editing. ` +
+          'Text-to-image can still work; switch to a gateway/model that supports image editing. ' +
+          `Original error: ${baseErrorMessage || `HTTP ${response.status}`}. ${detailedMessage}`
+      )
+    }
+
+    throw new Error(detailedMessage)
   }
 
-  const imagePart = payload.candidates
-    ?.flatMap((candidate) => candidate.content?.parts ?? [])
-    .find((part) => part.inlineData?.data)
+  const allParts = payload.candidates?.flatMap((candidate) => candidate.content?.parts ?? []) ?? []
+  const imagePart = allParts.find((part) => Boolean(getInlineData(part)?.data))
+  const inlineData = getInlineData(imagePart)
 
-  const mimeType = imagePart?.inlineData?.mimeType || 'image/png'
-  const data = imagePart?.inlineData?.data
+  const mimeType = inlineData?.mimeType || inlineData?.mime_type || 'image/png'
+  const data = inlineData?.data
   if (!data) {
-    throw new Error('gemini_image_missing')
+    const textMessage = payload.error?.message?.trim() || ''
+    const baseMessage = textMessage || 'gemini_image_missing'
+    throw new Error(
+      buildGeminiHttpError({
+        endpoint,
+        status: response.status,
+        requestId,
+        upstreamMessage: baseMessage,
+      })
+    )
   }
 
   return {
