@@ -1,4 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Frame, Image, MousePointer2, Pencil, RectangleHorizontal, Sparkles, Type } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   FormEvent,
@@ -85,7 +86,11 @@ import type {
 
 const INSERT_GAP = 40
 const MAX_TASKS = 16
-const SIDEBAR_WIDTH = 360
+const DEFAULT_SIDEBAR_WIDTH = 360
+const MIN_SIDEBAR_WIDTH = 340
+const MAX_SIDEBAR_WIDTH = 560
+const MIN_WORKBENCH_CANVAS_WIDTH = 240
+const SIDEBAR_WIDTH_STORAGE_KEY = 'canvas.workbench.sidebar-width'
 const BOARD_TOUCH_DEBOUNCE = 1200
 const DEFAULT_GENERATOR_ASPECT_RATIO: ImageAspectRatio = '1:1'
 const {
@@ -144,6 +149,41 @@ type GeneratorShapeMeta = {
 type CameraSourceSize = {
   width: number
   height: number
+}
+
+const getInitialViewportWidth = () => (typeof window === 'undefined' ? 1280 : window.innerWidth)
+
+const getMaxSidebarWidth = (viewportWidth: number) => {
+  return Math.max(
+    MIN_SIDEBAR_WIDTH,
+    Math.min(MAX_SIDEBAR_WIDTH, Math.round(viewportWidth - MIN_WORKBENCH_CANVAS_WIDTH))
+  )
+}
+
+const clampSidebarWidth = (width: number, viewportWidth = getInitialViewportWidth()) => {
+  return Math.min(getMaxSidebarWidth(viewportWidth), Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)))
+}
+
+const readStoredSidebarWidth = (viewportWidth = getInitialViewportWidth()) => {
+  if (typeof window === 'undefined') {
+    return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, viewportWidth)
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+    if (!rawValue) {
+      return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, viewportWidth)
+    }
+
+    const parsed = Number(rawValue)
+    if (!Number.isFinite(parsed)) {
+      return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, viewportWidth)
+    }
+
+    return clampSidebarWidth(parsed, viewportWidth)
+  } catch {
+    return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, viewportWidth)
+  }
 }
 
 export type AssistantActionPreset =
@@ -671,74 +711,23 @@ const maybePadImageToTargetRatio = async (
 }
 
 function ToolbarIcon({ icon }: { icon: ToolIconId }) {
-  const commonProps = {
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.8,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    'aria-hidden': true,
-  }
+  const commonProps = { size: 18, 'aria-hidden': true }
 
   switch (icon) {
     case 'select':
-      return (
-        <svg {...commonProps}>
-          <path d="M5 4L10.8 18.2L13.8 11.8L20 8.8L5 4Z" />
-        </svg>
-      )
+      return <MousePointer2 {...commonProps} />
     case 'frame':
-      return (
-        <svg {...commonProps}>
-          <path d="M8 4H10" />
-          <path d="M14 4H16" />
-          <path d="M8 20H10" />
-          <path d="M14 20H16" />
-          <path d="M4 8V10" />
-          <path d="M4 14V16" />
-          <path d="M20 8V10" />
-          <path d="M20 14V16" />
-          <rect x="7" y="7" width="10" height="10" rx="1.5" />
-        </svg>
-      )
+      return <Frame {...commonProps} />
     case 'rectangle':
-      return (
-        <svg {...commonProps}>
-          <rect x="4.5" y="5.5" width="15" height="13" rx="3" />
-        </svg>
-      )
+      return <RectangleHorizontal {...commonProps} />
     case 'text':
-      return (
-        <svg {...commonProps}>
-          <path d="M5 6H19" />
-          <path d="M12 6V18" />
-          <path d="M8 18H16" />
-        </svg>
-      )
+      return <Type {...commonProps} />
     case 'draw':
-      return (
-        <svg {...commonProps}>
-          <path d="M4 17.5L14.2 7.3C15.4 6.1 17.3 6.1 18.5 7.3C19.7 8.5 19.7 10.4 18.5 11.6L8.2 21H4V17.5Z" />
-          <path d="M13 8.5L17.5 13" />
-        </svg>
-      )
+      return <Pencil {...commonProps} />
     case 'asset':
-      return (
-        <svg {...commonProps}>
-          <rect x="4" y="5" width="16" height="14" rx="2.5" />
-          <path d="M7.5 14L10.7 10.8L13.6 13.7L15.6 11.7L18.5 14.6" />
-          <circle cx="15.8" cy="9" r="1.4" />
-        </svg>
-      )
+      return <Image {...commonProps} />
     case 'generator':
-      return (
-        <svg {...commonProps}>
-          <rect x="4" y="5" width="14" height="12" rx="2.5" />
-          <path d="M7.5 13L10.4 10.1L13.1 12.8L15.3 10.6L18 13.3" />
-          <path d="M18.5 5.5L19.2 7.1L20.8 7.8L19.2 8.5L18.5 10.1L17.8 8.5L16.2 7.8L17.8 7.1L18.5 5.5Z" />
-        </svg>
-      )
+      return <Sparkles {...commonProps} />
     default:
       return null
   }
@@ -748,6 +737,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const editor = useEditor()
   const tools = useTools()
   const navigate = useNavigate()
+  const [viewportWidth, setViewportWidth] = useState(() => getInitialViewportWidth())
+  const [sidebarWidth, setSidebarWidth] = useState(() => readStoredSidebarWidth(getInitialViewportWidth()))
 
   const [sidebarPrompt, setSidebarPrompt] = useState('')
   const [sidebarError, setSidebarError] = useState('')
@@ -799,6 +790,10 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const menuRef = useRef<HTMLDivElement>(null)
   const boardTouchTimerRef = useRef<number | null>(null)
   const tasksRef = useRef<GenerationTask[]>(tasks)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  const sidebarResizeStateRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(
+    null
+  )
   const cameraAbortControllerRef = useRef<AbortController | null>(null)
   const cameraAngleSessionRef = useRef(0)
   const chatEventSourceRef = useRef<EventSource | null>(null)
@@ -809,8 +804,27 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   }, [tasks])
 
   useEffect(() => {
+    sidebarWidthRef.current = sidebarWidth
+  }, [sidebarWidth])
+
+  useEffect(() => {
     cameraAbortControllerRef.current = cameraAbortController
   }, [cameraAbortController])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleResize = () => {
+      const nextViewportWidth = window.innerWidth
+      setViewportWidth(nextViewportWidth)
+      setSidebarWidth((currentWidth) => clampSidebarWidth(currentWidth, nextViewportWidth))
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -928,7 +942,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
     return null
   }, [editor, selectedImage, selectionState.firstSelectedImage, selectionState.isGeneratorCard])
-  const hasDesktopSidebar = typeof window === 'undefined' ? true : window.innerWidth > 720
+  const hasDesktopSidebar = viewportWidth > 720
   const showSidebar = hasDesktopSidebar
   const selectedSidebarImage =
     assistantMode === 'image-edit' || assistantMode === 'disabled' ? selectedImage : null
@@ -936,6 +950,83 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     assistantMode === 'disabled' &&
     selectionState.selectedCount > 1 &&
     !selectionState.hasAnySelectedImage
+
+  const persistSidebarWidth = useCallback((nextSidebarWidth: number) => {
+    if (typeof window === 'undefined') return
+
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextSidebarWidth))
+    } catch {
+      return
+    }
+  }, [])
+
+  const handleSidebarResizePointerMove = useCallback((event: PointerEvent) => {
+    const resizeState = sidebarResizeStateRef.current
+    if (!resizeState || event.pointerId !== resizeState.pointerId) return
+
+    event.preventDefault()
+    const deltaX = event.clientX - resizeState.startX
+    const nextSidebarWidth = clampSidebarWidth(resizeState.startWidth - deltaX, window.innerWidth)
+    setSidebarWidth(nextSidebarWidth)
+  }, [])
+
+  const handleSidebarResizePointerUp = useCallback(
+    (event: PointerEvent) => {
+      const resizeState = sidebarResizeStateRef.current
+      if (!resizeState || event.pointerId !== resizeState.pointerId) return
+
+      persistSidebarWidth(sidebarWidthRef.current)
+      sidebarResizeStateRef.current = null
+      document.body.classList.remove('is-resizing-workbench-sidebar')
+      window.removeEventListener('pointermove', handleSidebarResizePointerMove)
+      window.removeEventListener('pointerup', handleSidebarResizePointerUp)
+      window.removeEventListener('pointercancel', handleSidebarResizePointerUp)
+    },
+    [handleSidebarResizePointerMove, persistSidebarWidth]
+  )
+
+  const stopSidebarResize = useCallback(() => {
+    sidebarResizeStateRef.current = null
+    document.body.classList.remove('is-resizing-workbench-sidebar')
+    window.removeEventListener('pointermove', handleSidebarResizePointerMove)
+    window.removeEventListener('pointerup', handleSidebarResizePointerUp)
+    window.removeEventListener('pointercancel', handleSidebarResizePointerUp)
+  }, [handleSidebarResizePointerMove, handleSidebarResizePointerUp])
+
+  const handleSidebarResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!showSidebar || event.button !== 0) return
+
+      stopSidebarResize()
+      sidebarResizeStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: sidebarWidthRef.current,
+      }
+
+      document.body.classList.add('is-resizing-workbench-sidebar')
+      window.addEventListener('pointermove', handleSidebarResizePointerMove)
+      window.addEventListener('pointerup', handleSidebarResizePointerUp)
+      window.addEventListener('pointercancel', handleSidebarResizePointerUp)
+      event.preventDefault()
+    },
+    [showSidebar, stopSidebarResize, handleSidebarResizePointerMove, handleSidebarResizePointerUp]
+  )
+
+  useEffect(() => {
+    return () => {
+      stopSidebarResize()
+    }
+  }, [stopSidebarResize])
+
+  const workbenchStyle = useMemo(
+    () =>
+      ({
+        '--assistant-panel-width': showSidebar ? `${sidebarWidth}px` : '0px',
+      }) as CSSProperties,
+    [showSidebar, sidebarWidth]
+  )
 
   const runningCount = useMemo(
     () => tasks.filter((task) => task.status === 'running').length,
@@ -1412,27 +1503,33 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     const bounds = selectionState.selectionBounds
     if (isCameraAngleOpen || !selectionState.canShowFloatingActions || !bounds) return null
 
-    const sidebarOffset = showSidebar ? SIDEBAR_WIDTH : 0
+    const sidebarOffset = showSidebar ? sidebarWidth : 0
     const left = Math.min(bounds.midX, Math.max(120, window.innerWidth - sidebarOffset - 48))
 
     return {
       left,
       top: Math.max(88, bounds.top - 20),
     }
-  }, [isCameraAngleOpen, selectionState.canShowFloatingActions, selectionState.selectionBounds, showSidebar])
+  }, [
+    isCameraAngleOpen,
+    selectionState.canShowFloatingActions,
+    selectionState.selectionBounds,
+    showSidebar,
+    sidebarWidth,
+  ])
 
   const selectionImagineStyle = useMemo<CSSProperties | null>(() => {
     const bounds = selectionState.selectionBounds
     if (!selectionState.canImagineSelection || !bounds) return null
 
-    const sidebarOffset = showSidebar ? SIDEBAR_WIDTH : 0
+    const sidebarOffset = showSidebar ? sidebarWidth : 0
     const left = Math.min(bounds.midX, Math.max(120, window.innerWidth - sidebarOffset - 48))
 
     return {
       left,
       top: Math.min(window.innerHeight - 96, bounds.bottom + 18),
     }
-  }, [selectionState.canImagineSelection, selectionState.selectionBounds, showSidebar])
+  }, [selectionState.canImagineSelection, selectionState.selectionBounds, showSidebar, sidebarWidth])
 
   const generatorOverlayLayout = useMemo(() => {
     const bounds = selectionState.selectionBounds
@@ -3438,7 +3535,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   )
 
   return (
-    <div className={`canvas-workbench ${showSidebar ? 'has-sidebar' : 'no-sidebar'}`}>
+    <div className={`canvas-workbench ${showSidebar ? 'has-sidebar' : 'no-sidebar'}`} style={workbenchStyle}>
       <div className="canvas-workbench-topbar">
         <div className="canvas-workbench-brand">
           <Link to="/" className="workbench-chip workbench-chip--ghost">
@@ -3661,20 +3758,19 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
                 </label>
 
                 <div className="generator-prompt-actions">
-                  <div className="generator-size-group" role="group" aria-label="选择清晰度">
+                  <select
+                    className="generator-size-select"
+                    value={generatorImageSize}
+                    disabled={generatorBusy}
+                    aria-label="选择清晰度"
+                    onChange={(event) => handleGeneratorSizeChange(event.target.value as ImageGenerationSize)}
+                  >
                     {IMAGE_GENERATION_SIZES.map((imageSize) => (
-                      <button
-                        key={imageSize}
-                        type="button"
-                        className={imageSize === generatorImageSize ? 'is-active' : ''}
-                        disabled={generatorBusy}
-                        aria-pressed={imageSize === generatorImageSize}
-                        onClick={() => handleGeneratorSizeChange(imageSize)}
-                      >
+                      <option key={imageSize} value={imageSize}>
                         {imageSize}
-                      </button>
+                      </option>
                     ))}
-                  </div>
+                  </select>
 
                   <label className="generator-prompt-field generator-prompt-field--ratio">
                     <span className="generator-prompt-field-label">Ratio</span>
@@ -3741,6 +3837,11 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       {showSidebar ? (
         <aside className="canvas-workbench-sidebar">
+          <div
+            className="canvas-workbench-sidebar-resizer"
+            onPointerDown={handleSidebarResizePointerDown}
+            aria-hidden="true"
+          />
           <WorkbenchChatPanel
             boardTitle={board.title}
             messages={chatMessages}
