@@ -43,8 +43,12 @@ import {
 } from '../lib/workbenchGeneration'
 import type { AssistantMode, GenerationTaskOrigin } from '../lib/workbenchGeneration'
 import { CameraAngleDialog } from './CameraAngleDialog'
-import { DEFAULT_CAMERA_VIEW, buildCameraAnglePrompt } from '../lib/cameraAngle'
-import type { CameraRunState, CameraViewDraft } from '../lib/cameraAngle'
+import {
+  DEFAULT_CAMERA_VIEW,
+  DEFAULT_MULTI_ANGLE_MODE,
+  buildCameraAnglePrompt,
+} from '../lib/cameraAngle'
+import type { CameraRunState, CameraViewDraft, MultiAngleMode } from '../lib/cameraAngle'
 import {
   DEFAULT_MASK_FEATHER_PX,
   buildSemanticMaskPrompt,
@@ -770,8 +774,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const [cameraSourceSize, setCameraSourceSize] = useState<CameraSourceSize>({ width: 0, height: 0 })
   const [cameraRunStatus, setCameraRunStatus] = useState<CameraRunState>('idle')
   const [cameraDraftView, setCameraDraftView] = useState<CameraViewDraft>(DEFAULT_CAMERA_VIEW)
-  const [cameraGeneratedPreviewUrl, setCameraGeneratedPreviewUrl] = useState('')
-  const [cameraGeneratedMimeType, setCameraGeneratedMimeType] = useState<string | null>(null)
+  const [cameraAngleMode, setCameraAngleMode] = useState<MultiAngleMode>(DEFAULT_MULTI_ANGLE_MODE)
   const [cameraError, setCameraError] = useState('')
   const [cameraAbortController, setCameraAbortController] = useState<AbortController | null>(null)
   const [, setChatSession] = useState<ChatSession | null>(null)
@@ -1074,7 +1077,6 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     !cameraSourceLoading &&
     Boolean(cameraReferenceImageUrl) &&
     cameraRunStatus !== 'running'
-  const cameraCanConfirm = isCameraAngleOpen && Boolean(cameraGeneratedPreviewUrl)
 
   const scheduleBoardTouch = useCallback(() => {
     if (boardTouchTimerRef.current !== null) return
@@ -1231,8 +1233,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     setCameraSourceSize({ width: 0, height: 0 })
     setCameraRunStatus('idle')
     setCameraDraftView(DEFAULT_CAMERA_VIEW)
-    setCameraGeneratedPreviewUrl('')
-    setCameraGeneratedMimeType(null)
+    setCameraAngleMode(DEFAULT_MULTI_ANGLE_MODE)
     setCameraError('')
   }, [])
 
@@ -2147,8 +2148,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     setCameraSourceLoading(true)
     setCameraRunStatus('idle')
     setCameraDraftView(DEFAULT_CAMERA_VIEW)
-    setCameraGeneratedPreviewUrl('')
-    setCameraGeneratedMimeType(null)
+    setCameraAngleMode(DEFAULT_MULTI_ANGLE_MODE)
     setCameraError('')
 
     try {
@@ -2175,12 +2175,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     resetCameraAngleDialog()
   }, [resetCameraAngleDialog])
 
-  const runCameraAngleGeneration = useCallback(async () => {
+  const applyCameraAngleGeneration = useCallback(async () => {
     if (!cameraCanRun || !cameraReferenceImageUrl) return
 
     const sessionId = cameraAngleSessionRef.current
     const controller = new AbortController()
-    const prompt = buildCameraAnglePrompt(cameraDraftView, cameraSourceSize)
+    const prompt = buildCameraAnglePrompt(cameraDraftView, cameraSourceSize, cameraAngleMode)
+    const activeSourceShapeId = cameraSourceShapeId
 
     setCameraAbortController(controller)
     setCameraRunStatus('running')
@@ -2214,88 +2215,79 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       }
 
       if (cameraAngleSessionRef.current !== sessionId) return
+      if (!activeSourceShapeId) {
+        setCameraRunStatus('failed')
+        setCameraError('未找到原图，无法插入结果。')
+        return
+      }
 
-      setCameraGeneratedPreviewUrl(nextImageUrl)
-      setCameraGeneratedMimeType(nextMimeType)
-      setCameraRunStatus('succeeded')
-      setCameraError('')
+      const liveShape = editor.getShape<TLImageShape>(activeSourceShapeId)
+      if (!liveShape || liveShape.type !== 'image') {
+        setCameraRunStatus('failed')
+        setCameraError('原图已不存在，无法插入结果。')
+        return
+      }
+
+      const selectedBounds = editor.getShapePageBounds(liveShape)
+      const placement = getInsertPlacement('image-edit', {
+        viewportBounds: editor.getViewportPageBounds(),
+        selectedImage: {
+          shapeId: liveShape.id,
+          x: liveShape.x,
+          y: liveShape.y,
+          width: liveShape.props.w,
+          height: liveShape.props.h,
+          bounds: selectedBounds
+            ? {
+                minY: selectedBounds.minY,
+                maxX: selectedBounds.maxX,
+              }
+            : undefined,
+        },
+        insertGap: INSERT_GAP,
+      })
+
+      const insertedShapeId = createImageShape({
+        name: 'multi-angle-result',
+        imageUrl: nextImageUrl,
+        mimeType: nextMimeType,
+        width: placement.width,
+        height: placement.height,
+        x: placement.insertX,
+        y: placement.insertY,
+        altText: prompt,
+      })
+
+      selectAndRevealShape(insertedShapeId)
+
+      const updated = touchBoard(board.id)
+      if (updated) {
+        onBoardMetaChange?.()
+      }
+
+      resetCameraAngleDialog()
     } catch (error) {
       if (cameraAngleSessionRef.current !== sessionId) return
       if (controller.signal.aborted || isAbortError(error)) {
-        setCameraRunStatus(cameraGeneratedPreviewUrl ? 'succeeded' : 'idle')
+        setCameraRunStatus('idle')
         setCameraError('')
         return
       }
 
       setCameraRunStatus('failed')
-      setCameraError(error instanceof Error ? error.message : '视角调节生成失败，请稍后重试')
+      setCameraError(error instanceof Error ? error.message : '多角度生成失败，请稍后重试')
     } finally {
       if (cameraAngleSessionRef.current === sessionId) {
         setCameraAbortController(null)
       }
     }
   }, [
+    board.id,
+    cameraAngleMode,
     cameraCanRun,
     cameraDraftView,
-    cameraGeneratedPreviewUrl,
     cameraReferenceImageMimeType,
     cameraReferenceImageUrl,
-    cameraSourceSize,
-  ])
-
-  const completeCameraAngleDialog = useCallback(() => {
-    if (!cameraSourceShapeId || !cameraGeneratedPreviewUrl) return
-
-    const liveShape = editor.getShape<TLImageShape>(cameraSourceShapeId)
-    if (!liveShape || liveShape.type !== 'image') {
-      setCameraRunStatus('failed')
-      setCameraError('原图已不存在，无法插入结果。')
-      return
-    }
-
-    const selectedBounds = editor.getShapePageBounds(liveShape)
-    const placement = getInsertPlacement('image-edit', {
-      viewportBounds: editor.getViewportPageBounds(),
-      selectedImage: {
-        shapeId: liveShape.id,
-        x: liveShape.x,
-        y: liveShape.y,
-        width: liveShape.props.w,
-        height: liveShape.props.h,
-        bounds: selectedBounds
-          ? {
-              minY: selectedBounds.minY,
-              maxX: selectedBounds.maxX,
-            }
-          : undefined,
-      },
-      insertGap: INSERT_GAP,
-    })
-
-    const insertedShapeId = createImageShape({
-      name: 'camera-angle-result',
-      imageUrl: cameraGeneratedPreviewUrl,
-      mimeType: cameraGeneratedMimeType || 'image/png',
-      width: placement.width,
-      height: placement.height,
-      x: placement.insertX,
-      y: placement.insertY,
-      altText: buildCameraAnglePrompt(cameraDraftView, cameraSourceSize),
-    })
-
-    selectAndRevealShape(insertedShapeId)
-
-    const updated = touchBoard(board.id)
-    if (updated) {
-      onBoardMetaChange?.()
-    }
-
-    resetCameraAngleDialog()
-  }, [
-    board.id,
-    cameraDraftView,
-    cameraGeneratedMimeType,
-    cameraGeneratedPreviewUrl,
     cameraSourceShapeId,
     cameraSourceSize,
     createImageShape,
@@ -2304,6 +2296,11 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     resetCameraAngleDialog,
     selectAndRevealShape,
   ])
+
+  const resetMultiAnglePanel = useCallback(() => {
+    setCameraRunStatus('idle')
+    setCameraError('')
+  }, [])
 
   const handleSelectTaskResult = useCallback(
     (task: GenerationTask) => {
@@ -3538,7 +3535,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             onClick={() => void openCameraAngleDialog()}
             onMouseDown={handleToolbarMouseDown}
           >
-            视角调节
+            多角度
           </button>
         </div>
       ) : null}
@@ -3685,19 +3682,17 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       <CameraAngleDialog
         isOpen={isCameraAngleOpen}
         sourcePreviewUrl={cameraSourcePreviewUrl}
-        sourceWidth={cameraSourceSize.width}
-        sourceHeight={cameraSourceSize.height}
         sourceLoading={cameraSourceLoading}
         cameraView={cameraDraftView}
+        mode={cameraAngleMode}
         runStatus={cameraRunStatus}
-        generatedPreviewUrl={cameraGeneratedPreviewUrl}
         error={cameraError}
         onChangeView={setCameraDraftView}
-        onRun={() => void runCameraAngleGeneration()}
+        onChangeMode={setCameraAngleMode}
+        onReset={resetMultiAnglePanel}
+        onApply={() => void applyCameraAngleGeneration()}
         onClose={closeCameraAngleDialog}
-        onConfirm={completeCameraAngleDialog}
-        canRun={cameraCanRun}
-        canConfirm={cameraCanConfirm}
+        canApply={cameraCanRun}
       />
 
       {showSidebar ? (

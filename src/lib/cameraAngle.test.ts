@@ -2,16 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_CAMERA_VIEW,
   buildCameraAnglePrompt,
-  getCameraPresetMeta,
-  snapCameraPreviewToPreset,
+  getNearestPresets,
 } from './cameraAngle'
 
-describe('getCameraPresetMeta', () => {
+describe('getNearestPresets', () => {
   it('returns stable preset metadata for the default camera view', () => {
-    expect(getCameraPresetMeta(DEFAULT_CAMERA_VIEW)).toMatchObject({
-      orbitX: 0,
-      orbitY: 0,
-      depthProgress: 0.5,
+    expect(getNearestPresets(DEFAULT_CAMERA_VIEW)).toMatchObject({
       x: {
         value: 'front',
         promptChinese: '正面视角',
@@ -29,44 +25,61 @@ describe('getCameraPresetMeta', () => {
       },
     })
   })
-})
 
-describe('snapCameraPreviewToPreset', () => {
-  it('snaps orbit and depth values to the nearest semantic preset', () => {
+  it('snaps continuous values to the nearest semantic presets', () => {
     expect(
-      snapCameraPreviewToPreset({
-        orbitX: 0.48,
-        orbitY: -0.36,
+      getNearestPresets({
+        yawDeg: 40,
+        pitchDeg: -25,
         depthProgress: 0.29,
       })
-    ).toEqual({
-      x: 'front-right-quarter',
-      y: 'low-angle',
-      z: 'medium-close-up',
+    ).toMatchObject({
+      x: { value: 'front-right-quarter' },
+      y: { value: 'low-angle' },
+      z: { value: 'medium-close-up' },
     })
   })
 })
 
 describe('buildCameraAnglePrompt', () => {
-  it('includes bilingual camera semantics and composition constraints', () => {
+  it('includes camera mode semantics and precise degrees', () => {
     const prompt = buildCameraAnglePrompt(
       {
-        x: 'front-right-quarter',
-        y: 'low-angle',
-        z: 'medium-shot',
+        yawDeg: 40,
+        pitchDeg: -25,
+        depthProgress: 0.5,
       },
       {
         width: 1280,
         height: 720,
-      }
+      },
+      'camera'
     )
 
+    expect(prompt).toContain('Only change the camera position')
     expect(prompt).toContain('front-right three-quarter view / 正前偏右四分之三视角')
     expect(prompt).toContain('low-angle shot / 低机位仰拍')
     expect(prompt).toContain('medium shot / 中景景别')
-    expect(prompt).toContain('只改变机位，不改变主体身份、服装、发型、主体数量、场景主题、主光线风格。')
-    expect(prompt).toContain('主体保持在画面主要区域，构图自然完整。')
-    expect(prompt).toContain('禁止拼贴、多视图、额外人物、额外肢体、重复主体。')
+    expect(prompt).toContain('Yaw (rotate): 40°; Pitch (tilt): -25°;')
     expect(prompt).toContain('Keep the same source aspect ratio (1280 × 720).')
   })
+
+  it('switches key copy for subject mode', () => {
+    const prompt = buildCameraAnglePrompt(
+      {
+        yawDeg: 0,
+        pitchDeg: 0,
+        depthProgress: 0.5,
+      },
+      {
+        width: 512,
+        height: 512,
+      },
+      'subject'
+    )
+
+    expect(prompt).toContain('Rotate/tilt the subject')
+    expect(prompt).toContain('Keep the same source aspect ratio (512 × 512).')
+  })
 })
+

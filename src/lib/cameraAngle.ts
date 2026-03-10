@@ -14,10 +14,12 @@ export type CameraAxisZ =
   | 'medium-full-shot'
   | 'full-shot'
 
+export type MultiAngleMode = 'subject' | 'camera'
+
 export type CameraViewDraft = {
-  x: CameraAxisX
-  y: CameraAxisY
-  z: CameraAxisZ
+  yawDeg: number
+  pitchDeg: number
+  depthProgress: number
 }
 
 export type CameraRunState = 'idle' | 'running' | 'succeeded' | 'failed'
@@ -32,12 +34,10 @@ type CameraAxisOptionBase<TValue extends string> = {
 
 export type CameraAxisXOption = CameraAxisOptionBase<CameraAxisX> & {
   yawDeg: number
-  orbitX: number
 }
 
 export type CameraAxisYOption = CameraAxisOptionBase<CameraAxisY> & {
   pitchDeg: number
-  orbitY: number
 }
 
 export type CameraAxisZOption = CameraAxisOptionBase<CameraAxisZ> & {
@@ -45,31 +45,35 @@ export type CameraAxisZOption = CameraAxisOptionBase<CameraAxisZ> & {
   depthProgress: number
 }
 
-export type CameraViewPresetMeta = {
+export type CameraNearestPresets = {
   x: CameraAxisXOption
   y: CameraAxisYOption
   z: CameraAxisZOption
-  orbitX: number
-  orbitY: number
-  depthProgress: number
-}
-
-export type CameraPreviewPointerState = {
-  orbitX: number
-  orbitY: number
-  depthProgress: number
 }
 
 export const DEFAULT_CAMERA_VIEW: CameraViewDraft = {
-  x: 'front',
-  y: 'eye-level',
-  z: 'medium-shot',
+  yawDeg: 0,
+  pitchDeg: 0,
+  depthProgress: 0.5,
 }
+
+export const DEFAULT_MULTI_ANGLE_MODE: MultiAngleMode = 'camera'
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-const createOrbitValue = (degrees: number, maxAbsDegrees: number) =>
-  clamp(degrees / maxAbsDegrees, -1, 1)
+const roundTo = (value: number, step: number) => {
+  if (!Number.isFinite(value)) return 0
+  if (!Number.isFinite(step) || step <= 0) return Math.round(value)
+  return Math.round(value / step) * step
+}
+
+export const clampCameraView = (draft: CameraViewDraft): CameraViewDraft => {
+  return {
+    yawDeg: clamp(Math.round(draft.yawDeg), -90, 90),
+    pitchDeg: clamp(Math.round(draft.pitchDeg), -55, 55),
+    depthProgress: clamp(roundTo(draft.depthProgress, 0.01), 0, 1),
+  }
+}
 
 export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
   {
@@ -79,7 +83,6 @@ export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
     promptChinese: '左侧面视角',
     promptEnglish: 'left profile view',
     yawDeg: -90,
-    orbitX: -1,
   },
   {
     value: 'front-left-quarter',
@@ -88,7 +91,6 @@ export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
     promptChinese: '正前偏左四分之三视角',
     promptEnglish: 'front-left three-quarter view',
     yawDeg: -40,
-    orbitX: createOrbitValue(-40, 90),
   },
   {
     value: 'front',
@@ -97,7 +99,6 @@ export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
     promptChinese: '正面视角',
     promptEnglish: 'front view',
     yawDeg: 0,
-    orbitX: 0,
   },
   {
     value: 'front-right-quarter',
@@ -106,7 +107,6 @@ export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
     promptChinese: '正前偏右四分之三视角',
     promptEnglish: 'front-right three-quarter view',
     yawDeg: 40,
-    orbitX: createOrbitValue(40, 90),
   },
   {
     value: 'right-profile',
@@ -115,7 +115,6 @@ export const CAMERA_AXIS_X_OPTIONS: CameraAxisXOption[] = [
     promptChinese: '右侧面视角',
     promptEnglish: 'right profile view',
     yawDeg: 90,
-    orbitX: 1,
   },
 ]
 
@@ -127,7 +126,6 @@ export const CAMERA_AXIS_Y_OPTIONS: CameraAxisYOption[] = [
     promptChinese: '鸟瞰俯拍',
     promptEnglish: 'bird-eye shot',
     pitchDeg: 55,
-    orbitY: 1,
   },
   {
     value: 'high-angle',
@@ -136,7 +134,6 @@ export const CAMERA_AXIS_Y_OPTIONS: CameraAxisYOption[] = [
     promptChinese: '高机位俯拍',
     promptEnglish: 'high-angle shot',
     pitchDeg: 25,
-    orbitY: createOrbitValue(25, 55),
   },
   {
     value: 'eye-level',
@@ -145,7 +142,6 @@ export const CAMERA_AXIS_Y_OPTIONS: CameraAxisYOption[] = [
     promptChinese: '平视机位',
     promptEnglish: 'eye-level shot',
     pitchDeg: 0,
-    orbitY: 0,
   },
   {
     value: 'low-angle',
@@ -154,7 +150,6 @@ export const CAMERA_AXIS_Y_OPTIONS: CameraAxisYOption[] = [
     promptChinese: '低机位仰拍',
     promptEnglish: 'low-angle shot',
     pitchDeg: -25,
-    orbitY: createOrbitValue(-25, 55),
   },
   {
     value: 'worm-eye',
@@ -163,7 +158,6 @@ export const CAMERA_AXIS_Y_OPTIONS: CameraAxisYOption[] = [
     promptChinese: '极低机位仰视',
     promptEnglish: 'worm-eye shot',
     pitchDeg: -55,
-    orbitY: -1,
   },
 ]
 
@@ -215,7 +209,7 @@ export const CAMERA_AXIS_Z_OPTIONS: CameraAxisZOption[] = [
   },
 ]
 
-const nearestBy = <TValue extends string, TOption extends CameraAxisOptionBase<TValue>>(
+const nearestBy = <TOption>(
   options: TOption[],
   readValue: (option: TOption) => number,
   target: number
@@ -227,65 +221,55 @@ const nearestBy = <TValue extends string, TOption extends CameraAxisOptionBase<T
   })
 }
 
-const getXOption = (value: CameraAxisX) =>
-  CAMERA_AXIS_X_OPTIONS.find((option) => option.value === value) ?? CAMERA_AXIS_X_OPTIONS[2]
-
-const getYOption = (value: CameraAxisY) =>
-  CAMERA_AXIS_Y_OPTIONS.find((option) => option.value === value) ?? CAMERA_AXIS_Y_OPTIONS[2]
-
-const getZOption = (value: CameraAxisZ) =>
-  CAMERA_AXIS_Z_OPTIONS.find((option) => option.value === value) ?? CAMERA_AXIS_Z_OPTIONS[2]
-
-export const getCameraPresetMeta = (cameraView: CameraViewDraft): CameraViewPresetMeta => {
-  const x = getXOption(cameraView.x)
-  const y = getYOption(cameraView.y)
-  const z = getZOption(cameraView.z)
+export const getNearestPresets = (draft: CameraViewDraft): CameraNearestPresets => {
+  const view = clampCameraView(draft)
 
   return {
-    x,
-    y,
-    z,
-    orbitX: x.orbitX,
-    orbitY: y.orbitY,
-    depthProgress: z.depthProgress,
-  }
-}
-
-export const snapCameraPreviewToPreset = (
-  pointerState: CameraPreviewPointerState
-): CameraViewDraft => {
-  const orbitX = clamp(pointerState.orbitX, -1, 1)
-  const orbitY = clamp(pointerState.orbitY, -1, 1)
-  const depthProgress = clamp(pointerState.depthProgress, 0, 1)
-
-  return {
-    x: nearestBy(CAMERA_AXIS_X_OPTIONS, (option) => option.orbitX, orbitX).value,
-    y: nearestBy(CAMERA_AXIS_Y_OPTIONS, (option) => option.orbitY, orbitY).value,
-    z: nearestBy(CAMERA_AXIS_Z_OPTIONS, (option) => option.depthProgress, depthProgress).value,
+    x: nearestBy(CAMERA_AXIS_X_OPTIONS, (option) => option.yawDeg, view.yawDeg),
+    y: nearestBy(CAMERA_AXIS_Y_OPTIONS, (option) => option.pitchDeg, view.pitchDeg),
+    z: nearestBy(CAMERA_AXIS_Z_OPTIONS, (option) => option.depthProgress, view.depthProgress),
   }
 }
 
 export const buildCameraAnglePrompt = (
-  cameraView: CameraViewDraft,
-  sourceSize: { width: number; height: number }
+  draft: CameraViewDraft,
+  sourceSize: { width: number; height: number },
+  mode: MultiAngleMode
 ) => {
-  const meta = getCameraPresetMeta(cameraView)
+  const view = clampCameraView(draft)
+  const meta = getNearestPresets(view)
   const width = Math.max(1, Math.round(sourceSize.width))
   const height = Math.max(1, Math.round(sourceSize.height))
 
+  const actionLines =
+    mode === 'subject'
+      ? [
+          '动作 / Action:',
+          '只旋转/倾斜主体，尽量保持镜头参数合理，不要改变主体身份与整体风格。',
+          'Rotate/tilt the subject while keeping the overall style unchanged.',
+        ]
+      : [
+          '动作 / Action:',
+          '只改变镜头机位与景别（相机围绕主体移动），不要改变主体身份与整体风格。',
+          'Only change the camera position and shot distance (move the camera around the subject).',
+        ]
+
   return [
     '任务目标 / Goal:',
-    '基于参考图做单张图生图，仅调整镜头机位、拍摄角度、镜头距离和构图。',
-    'Generate a single edited image from the reference image while only changing the camera angle, shot angle, camera distance, and composition.',
+    '基于参考图做单张图生图，仅调整拍摄角度、机位与构图。',
+    'Generate a single edited image from the reference image while only changing the camera angle, shot angle, distance, and composition.',
     '',
     '约束 / Constraints:',
-    '只改变机位，不改变主体身份、服装、发型、主体数量、场景主题、主光线风格。',
+    '只改变机位/角度，不改变主体身份、服装、发型、主体数量、场景主题、主光线风格。',
     'Keep the same subject identity, outfit, hairstyle, subject count, scene theme, and main lighting style.',
+    '',
+    ...actionLines,
     '',
     '机位 / Camera View:',
     `${meta.x.promptEnglish} / ${meta.x.promptChinese}`,
     `${meta.y.promptEnglish} / ${meta.y.promptChinese}`,
     `${meta.z.promptEnglish} / ${meta.z.promptChinese}`,
+    `Yaw (rotate): ${view.yawDeg}°; Pitch (tilt): ${view.pitchDeg}°; Zoom progress: ${view.depthProgress.toFixed(2)} (${meta.z.englishLabel} / ${meta.z.label}).`,
     `Keep the same source aspect ratio (${width} × ${height}).`,
     '',
     '构图 / Composition:',
@@ -295,3 +279,4 @@ export const buildCameraAnglePrompt = (
     'Avoid collage, split view, extra people, extra limbs, and duplicated subjects.',
   ].join('\n')
 }
+

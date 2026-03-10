@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react'
 import * as THREE from 'three'
-import { getCameraPresetMeta, snapCameraPreviewToPreset } from '../lib/cameraAngle'
+import { clampCameraView } from '../lib/cameraAngle'
 import type { CameraViewDraft } from '../lib/cameraAngle'
 
 type CameraAngleThreePreviewProps = {
@@ -13,63 +13,66 @@ type DragState = {
   pointerId: number
   startX: number
   startY: number
-  startOrbitX: number
-  startOrbitY: number
+  startYawDeg: number
+  startPitchDeg: number
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-export function CameraAngleThreePreview({
-  sourcePreviewUrl,
-  cameraView,
-  onChangeView,
-}: CameraAngleThreePreviewProps) {
+const lerp = (from: number, to: number, alpha: number) => from + (to - from) * alpha
+
+export function CameraAngleThreePreview({ sourcePreviewUrl, cameraView, onChangeView }: CameraAngleThreePreviewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
-  const planeMeshRef = useRef<THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null>(null)
-  const cameraMarkerRef = useRef<THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial> | null>(null)
-  const cameraLineRef = useRef<THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | null>(null)
+  const cubeRef = useRef<THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial[]> | null>(null)
   const textureRef = useRef<THREE.Texture | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
-  const presetMeta = useMemo(() => getCameraPresetMeta(cameraView), [cameraView])
+  const renderRafRef = useRef<number | null>(null)
+  const commitRafRef = useRef<number | null>(null)
+  const viewTargetRef = useRef<CameraViewDraft>(clampCameraView(cameraView))
+  const viewCurrentRef = useRef<CameraViewDraft>(clampCameraView(cameraView))
+  const lastCommittedRef = useRef<CameraViewDraft>(clampCameraView(cameraView))
+  const pendingCommitRef = useRef<CameraViewDraft | null>(null)
+
+  useEffect(() => {
+    const next = clampCameraView(cameraView)
+    viewTargetRef.current = next
+    lastCommittedRef.current = next
+  }, [cameraView])
+
+  const scheduleCommit = useCallback(() => {
+    pendingCommitRef.current = viewTargetRef.current
+    if (commitRafRef.current !== null) return
+
+    commitRafRef.current = requestAnimationFrame(() => {
+      commitRafRef.current = null
+      const next = pendingCommitRef.current
+      pendingCommitRef.current = null
+      if (!next) return
+
+      const last = lastCommittedRef.current
+      if (
+        last.yawDeg === next.yawDeg &&
+        last.pitchDeg === next.pitchDeg &&
+        last.depthProgress === next.depthProgress
+      ) {
+        return
+      }
+
+      lastCommittedRef.current = next
+      onChangeView(next)
+    })
+  }, [onChangeView])
 
   const renderScene = useCallback(() => {
     const renderer = rendererRef.current
     const scene = sceneRef.current
     const camera = cameraRef.current
-    const planeMesh = planeMeshRef.current
-    const cameraMarker = cameraMarkerRef.current
-    const cameraLine = cameraLineRef.current
-    if (!renderer || !scene || !camera || !planeMesh || !cameraMarker || !cameraLine) return
-
-    const orbitRadius = 2.35 + presetMeta.z.depthProgress * 1.6
-    const theta = presetMeta.x.yawDeg * (Math.PI / 180)
-    const phi = THREE.MathUtils.degToRad(90 - presetMeta.y.pitchDeg)
-    const radiusXZ = Math.sin(phi) * orbitRadius
-    const cameraX = Math.sin(theta) * radiusXZ
-    const cameraY = Math.cos(phi) * orbitRadius * 0.92 + 0.08
-    const cameraZ = Math.cos(theta) * radiusXZ
-
-    camera.position.set(cameraX, cameraY, cameraZ)
-    camera.lookAt(0, 0.02, 0)
-    planeMesh.rotation.y = THREE.MathUtils.degToRad(-presetMeta.x.yawDeg * 0.38)
-    planeMesh.rotation.x = THREE.MathUtils.degToRad(presetMeta.y.pitchDeg * 0.16)
-    planeMesh.scale.setScalar(1.02 - presetMeta.z.depthProgress * 0.16)
-    cameraMarker.position.set(cameraX, cameraY, cameraZ)
-
-    const positions = cameraLine.geometry.attributes.position.array as Float32Array
-    positions[0] = cameraX
-    positions[1] = cameraY
-    positions[2] = cameraZ
-    positions[3] = 0
-    positions[4] = -0.72
-    positions[5] = 0
-    cameraLine.geometry.attributes.position.needsUpdate = true
-
+    if (!renderer || !scene || !camera) return
     renderer.render(scene, camera)
-  }, [presetMeta])
+  }, [])
 
   useEffect(() => {
     const host = hostRef.current
@@ -83,77 +86,48 @@ export function CameraAngleThreePreview({
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color('#f7fbff')
-    scene.fog = new THREE.Fog('#f7fbff', 5.5, 12)
     sceneRef.current = scene
 
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
-    camera.position.set(0, 0, 4.8)
+    const camera = new THREE.PerspectiveCamera(44, 1, 0.1, 100)
+    camera.position.set(0, 0, 4.5)
+    camera.lookAt(0, 0, 0)
     cameraRef.current = camera
 
-    const ambient = new THREE.AmbientLight('#ffffff', 1.35)
-    scene.add(ambient)
+    scene.add(new THREE.AmbientLight('#ffffff', 1.2))
+    const key = new THREE.DirectionalLight('#d7ebff', 1.75)
+    key.position.set(2.2, 2.8, 3.4)
+    scene.add(key)
+    const rim = new THREE.DirectionalLight('#ffd2e6', 0.9)
+    rim.position.set(-3.2, 1.1, -2.2)
+    scene.add(rim)
 
-    const keyLight = new THREE.DirectionalLight('#cfe5ff', 2.2)
-    keyLight.position.set(2.8, 3.6, 4.8)
-    scene.add(keyLight)
-
-    const rimLight = new THREE.DirectionalLight('#ffd2e6', 1.25)
-    rimLight.position.set(-3.2, 1.4, -2.2)
-    scene.add(rimLight)
-
-    const grid = new THREE.GridHelper(7, 12, '#d57cc5', '#cfdcf0')
-    grid.position.y = -1.35
-    ;(grid.material as THREE.Material).opacity = 0.42
-    ;(grid.material as THREE.Material).transparent = true
-    scene.add(grid)
-
-    const ringGeometry = new THREE.TorusGeometry(1.95, 0.05, 16, 80)
-    const ringMaterial = new THREE.MeshBasicMaterial({ color: '#e055a6', transparent: true, opacity: 0.88 })
-    const orbitRing = new THREE.Mesh(ringGeometry, ringMaterial)
-    orbitRing.rotation.x = Math.PI / 2
-    orbitRing.position.y = -0.72
-    scene.add(orbitRing)
-
-    const planeGeometry = new THREE.PlaneGeometry(1.72, 2.28)
-    const planeMaterial = new THREE.MeshStandardMaterial({
+    const geometry = new THREE.BoxGeometry(1.8, 1.8, 1.8)
+    const faceMaterial = new THREE.MeshStandardMaterial({
       color: '#ffffff',
-      roughness: 0.72,
-      metalness: 0.05,
-      side: THREE.DoubleSide,
+      roughness: 0.86,
+      metalness: 0.02,
     })
-    const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial)
-    planeMesh.position.set(0, 0.08, 0)
-    planeMeshRef.current = planeMesh
-    scene.add(planeMesh)
+    const sideMaterial = new THREE.MeshStandardMaterial({
+      color: '#f3f6fb',
+      roughness: 0.92,
+      metalness: 0.02,
+    })
+    const materials: THREE.MeshStandardMaterial[] = [
+      sideMaterial,
+      sideMaterial,
+      sideMaterial,
+      sideMaterial,
+      faceMaterial,
+      sideMaterial,
+    ]
+    const cube = new THREE.Mesh(geometry, materials)
+    cubeRef.current = cube
+    scene.add(cube)
 
-    const planeOutline = new THREE.LineSegments(
-      new THREE.EdgesGeometry(planeGeometry),
-      new THREE.LineBasicMaterial({ color: '#ff4f9e' })
-    )
-    planeMesh.add(planeOutline)
-
-    const focusSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(0.12, 24, 24),
-      new THREE.MeshStandardMaterial({ color: '#f5b400', emissive: '#7a5900', emissiveIntensity: 0.25 })
-    )
-    focusSphere.position.set(0, -0.72, 0)
-    scene.add(focusSphere)
-
-    const cameraMarker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.14, 24, 24),
-      new THREE.MeshStandardMaterial({ color: '#27d6c4', emissive: '#0b544f', emissiveIntensity: 0.22 })
-    )
-    cameraMarkerRef.current = cameraMarker
-    scene.add(cameraMarker)
-
-    const cameraLineMaterial = new THREE.LineBasicMaterial({ color: '#20c5c3' })
-    const cameraLineGeometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(),
-      new THREE.Vector3(),
-    ])
-    const cameraLine = new THREE.Line(cameraLineGeometry, cameraLineMaterial)
-    cameraLineRef.current = cameraLine
-    scene.add(cameraLine)
+    const edges = new THREE.EdgesGeometry(geometry)
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: '#b8c6dd' })
+    const cubeEdges = new THREE.LineSegments(edges, edgeMaterial)
+    cube.add(cubeEdges)
 
     const resize = () => {
       const width = Math.max(1, host.clientWidth)
@@ -174,27 +148,24 @@ export function CameraAngleThreePreview({
 
     return () => {
       observer.disconnect()
+      if (renderRafRef.current !== null) {
+        cancelAnimationFrame(renderRafRef.current)
+        renderRafRef.current = null
+      }
+      if (commitRafRef.current !== null) {
+        cancelAnimationFrame(commitRafRef.current)
+        commitRafRef.current = null
+      }
+
       textureRef.current?.dispose()
-      planeMaterial.map?.dispose()
-      planeMaterial.dispose()
-      planeGeometry.dispose()
-      ringGeometry.dispose()
-      ringMaterial.dispose()
-      grid.geometry.dispose()
-      ;(grid.material as THREE.Material).dispose()
-      focusSphere.geometry.dispose()
-      ;(focusSphere.material as THREE.Material).dispose()
-      cameraMarker.geometry.dispose()
-      ;(cameraMarker.material as THREE.Material).dispose()
-      planeOutline.geometry.dispose()
-      ;(planeOutline.material as THREE.Material).dispose()
-      cameraLine.geometry.dispose()
-      cameraLineMaterial.dispose()
+      faceMaterial.map?.dispose()
+      geometry.dispose()
+      materials.forEach((material) => material.dispose())
+      edges.dispose()
+      edgeMaterial.dispose()
       renderer.dispose()
       host.removeChild(renderer.domElement)
-      planeMeshRef.current = null
-      cameraMarkerRef.current = null
-      cameraLineRef.current = null
+      cubeRef.current = null
       rendererRef.current = null
       sceneRef.current = null
       cameraRef.current = null
@@ -202,27 +173,34 @@ export function CameraAngleThreePreview({
   }, [renderScene])
 
   useEffect(() => {
-    const planeMesh = planeMeshRef.current
-    if (!sourcePreviewUrl || !planeMesh) return
+    const cube = cubeRef.current
+    if (!sourcePreviewUrl || !cube) return
 
     const loader = new THREE.TextureLoader()
     let disposed = false
+
     loader.load(
       sourcePreviewUrl,
       (texture) => {
-        if (disposed || !planeMeshRef.current) {
+        if (disposed || !cubeRef.current) {
           texture.dispose()
           return
         }
+
         texture.colorSpace = THREE.SRGBColorSpace
         texture.minFilter = THREE.LinearFilter
         texture.magFilter = THREE.LinearFilter
-        const material = planeMeshRef.current.material
+
+        const faceMaterial = cubeRef.current.material[4]
+        const previousMap = faceMaterial.map
+        if (previousMap && previousMap !== texture) {
+          previousMap.dispose()
+        }
+
         textureRef.current?.dispose()
-        material.map?.dispose()
         textureRef.current = texture
-        material.map = texture
-        material.needsUpdate = true
+        faceMaterial.map = texture
+        faceMaterial.needsUpdate = true
         renderScene()
       },
       undefined,
@@ -235,11 +213,48 @@ export function CameraAngleThreePreview({
   }, [renderScene, sourcePreviewUrl])
 
   useEffect(() => {
-    renderScene()
-  }, [renderScene])
+    const animate = () => {
+      renderRafRef.current = requestAnimationFrame(animate)
+
+      const cube = cubeRef.current
+      const renderer = rendererRef.current
+      const scene = sceneRef.current
+      const camera = cameraRef.current
+      if (!cube || !renderer || !scene || !camera) return
+
+      const target = viewTargetRef.current
+      const current = viewCurrentRef.current
+      const alpha = 0.14
+
+      const nextYaw = lerp(current.yawDeg, target.yawDeg, alpha)
+      const nextPitch = lerp(current.pitchDeg, target.pitchDeg, alpha)
+      const nextDepth = lerp(current.depthProgress, target.depthProgress, alpha)
+
+      viewCurrentRef.current = {
+        yawDeg: nextYaw,
+        pitchDeg: nextPitch,
+        depthProgress: nextDepth,
+      }
+
+      cube.rotation.y = THREE.MathUtils.degToRad(nextYaw)
+      cube.rotation.x = THREE.MathUtils.degToRad(nextPitch)
+      const scale = 1.05 - nextDepth * 0.12
+      cube.scale.setScalar(scale)
+
+      renderer.render(scene, camera)
+    }
+
+    animate()
+    return () => {
+      if (renderRafRef.current !== null) {
+        cancelAnimationFrame(renderRafRef.current)
+        renderRafRef.current = null
+      }
+    }
+  }, [])
 
   const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: ReactPointerEvent<HTMLDivElement>) => {
       event.preventDefault()
       const host = hostRef.current
       if (!host) return
@@ -248,16 +263,16 @@ export function CameraAngleThreePreview({
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
-        startOrbitX: presetMeta.orbitX,
-        startOrbitY: presetMeta.orbitY,
+        startYawDeg: viewTargetRef.current.yawDeg,
+        startPitchDeg: viewTargetRef.current.pitchDeg,
       }
       host.setPointerCapture(event.pointerId)
     },
-    [presetMeta.orbitX, presetMeta.orbitY]
+    []
   )
 
   const handlePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: ReactPointerEvent<HTMLDivElement>) => {
       const dragState = dragStateRef.current
       const host = hostRef.current
       if (!dragState || dragState.pointerId !== event.pointerId || !host) return
@@ -265,24 +280,22 @@ export function CameraAngleThreePreview({
       const rect = host.getBoundingClientRect()
       const deltaX = (event.clientX - dragState.startX) / Math.max(1, rect.width)
       const deltaY = (event.clientY - dragState.startY) / Math.max(1, rect.height)
-      const orbitX = clamp(dragState.startOrbitX + deltaX * 2.1, -1, 1)
-      const orbitY = clamp(dragState.startOrbitY - deltaY * 2.1, -1, 1)
-      const snapped = snapCameraPreviewToPreset({
-        orbitX,
-        orbitY,
-        depthProgress: presetMeta.depthProgress,
+
+      const yawDeg = dragState.startYawDeg + deltaX * 180
+      const pitchDeg = dragState.startPitchDeg - deltaY * 110
+      const next = clampCameraView({
+        yawDeg,
+        pitchDeg,
+        depthProgress: viewTargetRef.current.depthProgress,
       })
 
-      onChangeView({
-        ...cameraView,
-        x: snapped.x,
-        y: snapped.y,
-      })
+      viewTargetRef.current = next
+      scheduleCommit()
     },
-    [cameraView, onChangeView, presetMeta.depthProgress]
+    [scheduleCommit]
   )
 
-  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const handlePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const host = hostRef.current
     const dragState = dragStateRef.current
     if (host && dragState?.pointerId === event.pointerId) {
@@ -292,20 +305,18 @@ export function CameraAngleThreePreview({
   }, [])
 
   const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+    (event: ReactWheelEvent<HTMLDivElement>) => {
       event.preventDefault()
-      const depthProgress = clamp(presetMeta.depthProgress + event.deltaY * 0.0016, 0, 1)
-      const snapped = snapCameraPreviewToPreset({
-        orbitX: presetMeta.orbitX,
-        orbitY: presetMeta.orbitY,
+      const depthProgress = clamp(viewTargetRef.current.depthProgress + event.deltaY * 0.0016, 0, 1)
+      const next = clampCameraView({
+        yawDeg: viewTargetRef.current.yawDeg,
+        pitchDeg: viewTargetRef.current.pitchDeg,
         depthProgress,
       })
-      onChangeView({
-        ...cameraView,
-        z: snapped.z,
-      })
+      viewTargetRef.current = next
+      scheduleCommit()
     },
-    [cameraView, onChangeView, presetMeta.depthProgress, presetMeta.orbitX, presetMeta.orbitY]
+    [scheduleCommit]
   )
 
   return (
@@ -317,9 +328,10 @@ export function CameraAngleThreePreview({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       onWheel={handleWheel}
-      aria-label="Three.js 3D 相机预览"
+      aria-label="Three.js 立方体视角预览"
     >
-      <div className="camera-angle-three-hint">拖动调整 X/Y，滚轮调整 Z</div>
+      <div className="camera-angle-three-hint">拖动旋转，滚轮缩放</div>
     </div>
   )
 }
+

@@ -33,3 +33,5 @@ debug-image-io/
 
 # 构建产物备份
 Canvas/
+
+.data/

@@ -533,7 +533,8 @@ button {
 .generator-card-header,
 .generator-prompt-dock,
 .camera-angle-overlay,
-.camera-angle-shell {
+.camera-angle-shell,
+.multi-angle-panel {
   pointer-events: auto;
 }
 
@@ -1207,6 +1208,179 @@ button {
 .camera-angle-actions button[disabled] {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.multi-angle-panel {
+  position: fixed;
+  left: 24px;
+  top: 84px;
+  width: 320px;
+  border-radius: 18px;
+  border: 1px solid rgba(205, 211, 223, 0.92);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 44px rgba(18, 30, 56, 0.18);
+  backdrop-filter: blur(12px);
+  padding: 14px;
+  z-index: 3600;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.multi-angle-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.multi-angle-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1f2a44;
+}
+
+.multi-angle-reset {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid rgba(212, 219, 232, 0.96);
+  background: rgba(255, 255, 255, 0.92);
+  color: #2a3c63;
+  font-weight: 800;
+}
+
+.multi-angle-reset:hover {
+  background: #f4f7fb;
+}
+
+.multi-angle-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-radius: 14px;
+  background: #f1f5fb;
+  padding: 4px;
+}
+
+.multi-angle-tabs button {
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #4b5a72;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.multi-angle-tabs button.is-active {
+  background: #ffffff;
+  color: #17243b;
+  box-shadow: 0 10px 18px rgba(18, 30, 56, 0.08);
+}
+
+.multi-angle-cube {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid rgba(212, 219, 232, 0.96);
+  background: radial-gradient(circle at 50% 20%, #f8fbff 0%, #eef4fb 60%, #e8eef8 100%);
+  overflow: hidden;
+}
+
+.multi-angle-cube .camera-angle-three-preview {
+  height: 196px;
+}
+
+.multi-angle-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #203050;
+  background: rgba(247, 250, 255, 0.7);
+}
+
+.multi-angle-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.multi-angle-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.multi-angle-slider__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #18253d;
+}
+
+.multi-angle-slider__value {
+  color: #5a6c86;
+  font-variant-numeric: tabular-nums;
+}
+
+.multi-angle-slider input[type='range'] {
+  width: 100%;
+}
+
+.multi-angle-status {
+  margin: 0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: #f3f7fd;
+  color: #2f3a52;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.multi-angle-status.is-error {
+  background: #fff4f4;
+  color: #b42318;
+}
+
+.multi-angle-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.multi-angle-actions button {
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 800;
+}
+
+.multi-angle-primary {
+  background: #21252f;
+  color: #ffffff;
+}
+
+.multi-angle-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.multi-angle-secondary {
+  background: #edf1f7;
+  color: #32435f;
 }
 
 .canvas-workbench-imaginebar {
