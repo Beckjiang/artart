@@ -41,12 +41,6 @@ const formatTime = (value: string) =>
     minute: '2-digit',
   }).format(new Date(value))
 
-const getMessageLabel = (message: ChatMessage) => {
-  if (message.role === 'user') return '你'
-  if (message.role === 'tool') return '工具'
-  if (message.role === 'system') return '系统'
-  return '助手'
-}
 
 const getMessageClassName = (message: ChatMessage) => {
   return [
@@ -241,7 +235,7 @@ export function WorkbenchChatPanel({
                       <p>{getAttachmentMeta(attachment)}</p>
                     </div>
 
-                    {/* {attachment.kind === 'generated-image' ? (
+                    {attachment.kind === 'generated-image' ? (
                       <div className="workbench-chat-attachment-actions">
                         <button type="button" onClick={() => onLocateAttachment(attachment)}>
                           定位到画布
@@ -250,7 +244,7 @@ export function WorkbenchChatPanel({
                           作为参考图发送
                         </button>
                       </div>
-                    ) : null} */}
+                    ) : null}
                   </div>
                 ))}
               </div>
