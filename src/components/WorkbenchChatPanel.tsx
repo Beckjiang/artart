@@ -221,11 +221,10 @@ export function WorkbenchChatPanel({
         {messages.map((message) => (
           <article key={message.id} className={getMessageClassName(message)}>
             <div className="workbench-chat-message-meta">
-              <strong>{getMessageLabel(message)}</strong>
               <span>{formatTime(message.createdAt)}</span>
             </div>
 
-            {message.text ? <p className="workbench-chat-message-text">{message.text}</p> : null}
+            {message.text ? <p className={`workbench-chat-message-text ${message.role === 'user' ? 'workbench-chat-message-text-user' : ''}`}>{message.text}</p> : null}
 
             {message.attachments.length > 0 ? (
               <div className="workbench-chat-attachments">
@@ -242,7 +241,7 @@ export function WorkbenchChatPanel({
                       <p>{getAttachmentMeta(attachment)}</p>
                     </div>
 
-                    {attachment.kind === 'generated-image' ? (
+                    {/* {attachment.kind === 'generated-image' ? (
                       <div className="workbench-chat-attachment-actions">
                         <button type="button" onClick={() => onLocateAttachment(attachment)}>
                           定位到画布
@@ -251,7 +250,7 @@ export function WorkbenchChatPanel({
                           作为参考图发送
                         </button>
                       </div>
-                    ) : null}
+                    ) : null} */}
                   </div>
                 ))}
               </div>

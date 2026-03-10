@@ -1,4 +1,5 @@
-import { Frame, Image, MousePointer2, Pencil, RectangleHorizontal, Sparkles, Type } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
+import { Eraser, Frame, Image, Layers, MousePointer2, Pencil, RectangleHorizontal, Sparkles, Trash2, Type, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
@@ -239,6 +240,7 @@ type CanvasWorkbenchProps = {
 
 type PresetDefinition = {
   label: string
+  icon: LucideIcon
   helper: string
   defaultPrompt: string
   placeholder: string
@@ -252,43 +254,50 @@ type ToolItem = {
 
 const ACTION_PRESETS: Record<AssistantActionPreset, PresetDefinition> = {
   'text-to-image': {
-    label: 'Text to image',
+    label: '文字生图',
+    icon: Sparkles,
     helper: '不使用参考图，直接根据提示词生成并插入一张新图片。',
     defaultPrompt: '',
     placeholder: 'Describe what you want to create today',
   },
   'imagine-selection': {
-    label: 'Imagine',
+    label: '想象',
+    icon: Wand2,
     helper: '将当前多选元素合成为一张参考图，再生成新的融合结果。',
     defaultPrompt: SELECTION_IMAGINE_PROMPT,
     placeholder: SELECTION_IMAGINE_PROMPT,
   },
   'quick-edit': {
-    label: 'Quick Edit',
+    label: '快速编辑',
+    icon: Pencil,
     helper: '自由描述想修改的内容，保持现有图像作为参考。',
     defaultPrompt: '',
     placeholder: '描述想如何编辑这张图片，例如：增强立体感、调整配色、让 logo 更适合面试封面。',
   },
   'remove-bg': {
-    label: 'Remove bg',
+    label: '去除背景',
+    icon: Eraser,
     helper: '去除背景并保留主体，适合快速做纯底或透明感素材。',
     defaultPrompt: '请去除这张图片的背景并保留主体，保持主体边缘自然清晰，输出干净简洁的背景效果。',
     placeholder: '补充你的背景处理要求，例如：纯白背景、透明背景、电商主图风格。',
   },
   'remove-object': {
-    label: 'Remove object',
+    label: '移除对象',
+    icon: Trash2,
     helper: '移除干扰元素并自动补全背景。',
     defaultPrompt: '请移除图片中的指定对象或干扰元素，并自然补全背景与纹理，保持整体风格一致。需要移除的对象：',
     placeholder: '说明要移除什么，例如：右上角文字、水印、多余人物、背景杂物。',
   },
   'edit-elements': {
-    label: 'Edit elements',
+    label: '编辑元素',
+    icon: Layers,
     helper: '保持风格不变，替换或修改局部元素。',
     defaultPrompt: '请保持整体风格和构图，按以下要求修改或替换局部元素，使结果自然协调：',
     placeholder: '说明要替换或新增的元素，例如：把背景改成极简灰色、把图标换成几何风。',
   },
   'edit-text': {
-    label: 'Edit text',
+    label: '编辑文字',
+    icon: Type,
     helper: '保持版式和视觉风格，修改图片中的文字内容。',
     defaultPrompt: '请保持原有版式与视觉风格，按以下要求修改图片中的文字内容，并保证字体和排版自然统一：',
     placeholder: '输入新的文案要求，例如：将主标题改成“Realtime Copilot”。',
@@ -3541,62 +3550,6 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           <Link to="/" className="workbench-chip workbench-chip--ghost">
             ← 返回
           </Link>
-
-          <div className="workbench-title-card">
-            {isRenaming ? (
-              <input
-                ref={titleInputRef}
-                value={draftTitle}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                onBlur={handleRenameCommit}
-                onKeyDown={handleTitleKeyDown}
-                className="workbench-title-input"
-                aria-label="重命名画布"
-              />
-            ) : (
-              <button
-                type="button"
-                className="workbench-title-button"
-                onClick={handleRenameStart}
-                onMouseDown={handleToolbarMouseDown}
-              >
-                <span>{board.title}</span>
-              </button>
-            )}
-            <p>最近更新：{formatDate(board.updatedAt)}</p>
-          </div>
-
-          <div className="workbench-more" ref={menuRef}>
-            <button
-              type="button"
-              className="workbench-chip workbench-chip--ghost"
-              onClick={() => setIsMenuOpen((value) => !value)}
-              onMouseDown={handleToolbarMouseDown}
-              aria-label="更多操作"
-            >
-              ⋯
-            </button>
-
-            {isMenuOpen ? (
-              <div className="workbench-popover-menu">
-                <button
-                  type="button"
-                  onClick={handleRenameStart}
-                  onMouseDown={handleToolbarMouseDown}
-                >
-                  重命名
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={handleDeleteBoard}
-                  onMouseDown={handleToolbarMouseDown}
-                >
-                  删除画布
-                </button>
-              </div>
-            ) : null}
-          </div>
         </div>
 
         <div className="canvas-workbench-zoom workbench-chip">
@@ -3659,17 +3612,21 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       {floatingActionStyle ? (
         <div className="canvas-workbench-actionbar" style={floatingActionStyle}>
-          {IMAGE_EDIT_PRESETS.map((preset) => (
-            <button
-              key={preset}
-              type="button"
-              className={activePreset === preset ? 'is-active' : ''}
-              onClick={() => handleSelectPreset(preset)}
-              onMouseDown={handleToolbarMouseDown}
-            >
-              {ACTION_PRESETS[preset].label}
-            </button>
-          ))}
+          {IMAGE_EDIT_PRESETS.map((preset) => {
+            const { icon: PresetIcon, label } = ACTION_PRESETS[preset]
+            return (
+              <button
+                key={preset}
+                type="button"
+                className={activePreset === preset ? 'is-active' : ''}
+                onClick={() => handleSelectPreset(preset)}
+                onMouseDown={handleToolbarMouseDown}
+              >
+                <PresetIcon size={14} />
+                {label}
+              </button>
+            )
+          })}
           <button
             type="button"
             className="camera-angle-action-trigger"

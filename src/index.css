@@ -662,9 +662,11 @@ body.is-resizing-workbench-sidebar {
 }
 
 .canvas-workbench-zoom {
-  position: absolute;
+  /* position: absolute;
   left: calc((100% - var(--assistant-panel-width)) / 2);
-  transform: translateX(-50%);
+  transform: translateX(-50%); */
+  position: fixed;
+  bottom: 18px;
   gap: 6px;
 }
 
@@ -742,29 +744,34 @@ body.is-resizing-workbench-sidebar {
   transform: translate(-50%, -100%);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 6px;
   border-radius: 16px;
-  border: 1px solid rgba(205, 211, 223, 0.96);
+  border: 1px solid rgba(205, 211, 223, 0.3);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 18px 36px rgba(18, 30, 56, 0.14);
   backdrop-filter: blur(12px);
 }
 
 .canvas-workbench-actionbar button {
-  border: 1px solid #d7dfeb;
+  border: 0px solid #d7dfeb;
   border-radius: 12px;
-  padding: 8px 12px;
+  padding: 8px 6px;
   background: #fff;
   color: #203050;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
 }
 
 .canvas-workbench-actionbar button.is-active,
 .canvas-workbench-actionbar button:hover {
-  border-color: #7da5e6;
+  /* border-color: #7da5e6; */
   background: #eef5ff;
   color: #1d4db4;
 }
@@ -1709,10 +1716,11 @@ body.is-resizing-workbench-sidebar {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
-  background: rgba(250, 251, 253, 0.96);
+  padding: 4px;
+  background: white;
   backdrop-filter: blur(14px);
   overflow: hidden;
+  border-radius: 28px;
 }
 
 .canvas-workbench-sidebar-resizer {
@@ -1732,26 +1740,22 @@ body.is-resizing-workbench-sidebar {
   left: 6px;
   top: 14px;
   bottom: 14px;
-  width: 2px;
+  width: 0px;
   border-radius: 999px;
   background: rgba(163, 173, 189, 0.28);
   transition: background-color 120ms ease;
 }
 
-.canvas-workbench-sidebar:hover .canvas-workbench-sidebar-resizer::before,
+/* .canvas-workbench-sidebar:hover .canvas-workbench-sidebar-resizer::before,
 body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   background: rgba(88, 102, 123, 0.5);
-}
+} */
 
 .workbench-chat-shell {
   min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
-  border-radius: 28px;
-  background:
-    linear-gradient(90deg, rgba(244, 246, 248, 0.96) 0%, rgba(239, 243, 246, 0.88) 100%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(242, 245, 247, 0.98) 100%);
   overflow: hidden;
 }
 
@@ -1921,8 +1925,6 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 12px;
-  border-radius: 16px;
   background: rgba(255, 255, 255, 0.54);
 }
 
@@ -1933,11 +1935,14 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
 
 .workbench-chat-message.is-assistant,
 .workbench-chat-message.is-tool {
-  margin-right: 14px;
+  margin-right: 0px;
+
 }
 
 .workbench-chat-message.is-tool {
   background: rgba(244, 247, 250, 0.66);
+  padding: 8px;
+  border-radius: 6px;
 }
 
 .workbench-chat-message.is-failed {
@@ -1966,6 +1971,12 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   white-space: pre-wrap;
 }
 
+.workbench-chat-message-text-user {
+  background-color: #F7F7F7;
+  padding: 6px 8px;
+  border-radius: 12px;
+}
+
 .workbench-chat-attachments {
   display: grid;
   gap: 8px;
@@ -1975,7 +1986,7 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px;
+  padding: 8px 0;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.56);
 }
@@ -2030,8 +2041,7 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   padding: 14px 10px 12px;
   min-height: 220px;
   border-radius: 24px;
-  border: 1px solid rgba(195, 200, 208, 0.92);
-  background: rgba(245, 246, 247, 0.92);
+  border: 1px solid rgba(195, 200, 208, 0.3);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
     0 3px 10px rgba(35, 43, 56, 0.04);
@@ -2652,7 +2662,7 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
 
 .canvas-workbench-sidebar {
   gap: 14px;
-  padding: 14px;
+  padding: 4px;
   overflow: auto;
 }
 
