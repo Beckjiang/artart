@@ -12,7 +12,8 @@ import type {
   ChatSession,
   CreateAgentAssetRequest,
 } from '../../src/lib/agentChatTypes'
-import { safeJsonParse } from './utils'
+import { maybeExternalizePayload, resolveExternalizedPayload } from './payloadStore'
+import { nowIso, safeJsonParse } from './utils'
 
 type DbHandle = Awaited<ReturnType<typeof createDatabase>>
 
@@ -74,8 +75,54 @@ type AssetRow = {
 
 const DATA_DIR = path.join(process.cwd(), '.data')
 const DB_PATH = path.join(DATA_DIR, 'agent-chat.sqlite')
+const PAYLOAD_DIR = path.join(DATA_DIR, 'agent-payloads')
+const ACTIVE_RUN_STALE_MS = 3 * 60 * 1000
+const STALE_RUN_ERROR = 'stale_run_recovered'
+const STALE_RUN_MESSAGE = '上一次生成已中断，请重新发送。'
 
 let dbPromise: Promise<DbHandle> | null = null
+
+const storePayloadValue = (recordId: string, field: string, value?: string | null) =>
+  maybeExternalizePayload({
+    payloadDir: PAYLOAD_DIR,
+    recordId,
+    field,
+    value,
+  })
+
+const resolvePayloadValue = (value?: string | null) =>
+  resolveExternalizedPayload({
+    payloadDir: PAYLOAD_DIR,
+    value,
+  })
+
+const buildStoredPayloadPair = (
+  recordId: string,
+  previewUrl?: string | null,
+  dataUrl?: string | null
+) => {
+  const storedDataUrl = storePayloadValue(recordId, 'data-url', dataUrl)
+  const effectivePreviewUrl = previewUrl ?? dataUrl ?? null
+  const storedPreviewUrl =
+    effectivePreviewUrl && effectivePreviewUrl === dataUrl
+      ? storedDataUrl
+      : storePayloadValue(recordId, 'preview-url', effectivePreviewUrl)
+
+  return {
+    previewUrl: storedPreviewUrl,
+    dataUrl: storedDataUrl,
+  }
+}
+
+export const isAgentRunStale = (
+  updatedAt: string,
+  now = Date.now(),
+  thresholdMs = ACTIVE_RUN_STALE_MS
+) => {
+  const updatedAtMs = new Date(updatedAt).getTime()
+  if (Number.isNaN(updatedAtMs)) return false
+  return now - updatedAtMs > thresholdMs
+}
 
 const createDatabase = async () => {
   mkdirSync(DATA_DIR, { recursive: true })
@@ -208,19 +255,25 @@ const hydrateAttachments = async (messageId: string): Promise<ChatAttachment[]> 
     { $messageId: messageId }
   )
 
-  return rows.map((row) => ({
-    id: row.id,
-    assetId: row.asset_id,
-    kind: row.kind,
-    name: row.name,
-    mimeType: row.mime_type,
-    previewUrl: row.preview_url,
-    dataUrl: row.data_url,
-    width: row.width,
-    height: row.height,
-    shapeId: row.shape_id,
-    canvasShapeId: row.canvas_shape_id,
-  }))
+  return Promise.all(
+    rows.map(async (row) => {
+      const assetRow = row.asset_id ? await getAssetRow(row.asset_id) : null
+
+      return {
+        id: row.id,
+        assetId: row.asset_id,
+        kind: row.kind,
+        name: row.name,
+        mimeType: row.mime_type,
+        previewUrl: resolvePayloadValue(row.preview_url) ?? resolvePayloadValue(assetRow?.preview_url) ?? null,
+        dataUrl: resolvePayloadValue(row.data_url) ?? resolvePayloadValue(assetRow?.data_url) ?? null,
+        width: row.width,
+        height: row.height,
+        shapeId: row.shape_id,
+        canvasShapeId: row.canvas_shape_id,
+      }
+    })
+  )
 }
 
 const hydrateMessage = async (row: {
@@ -316,6 +369,8 @@ export const createAsset = async (
   createdAt: string
 ): Promise<ChatAttachment> => {
   const db = await getDb()
+  const storedPayloads = buildStoredPayloadPair(id, request.previewUrl ?? request.dataUrl, request.dataUrl)
+
   db.run(
     `INSERT INTO agent_asset (
       id, board_id, kind, name, mime_type, preview_url, data_url, width, height, shape_id, created_at
@@ -328,8 +383,8 @@ export const createAsset = async (
       $kind: request.kind,
       $name: request.name,
       $mimeType: request.mimeType ?? null,
-      $previewUrl: request.previewUrl ?? request.dataUrl,
-      $dataUrl: request.dataUrl,
+      $previewUrl: storedPayloads.previewUrl,
+      $dataUrl: storedPayloads.dataUrl,
       $width: request.width ?? null,
       $height: request.height ?? null,
       $shapeId: request.shapeId ?? null,
@@ -488,8 +543,8 @@ export const attachAssetsToMessage = async (
         $kind: assetRow.kind,
         $name: assetRow.name,
         $mimeType: assetRow.mime_type,
-        $previewUrl: assetRow.preview_url,
-        $dataUrl: assetRow.data_url,
+        $previewUrl: null,
+        $dataUrl: null,
         $width: assetRow.width,
         $height: assetRow.height,
         $shapeId: assetRow.shape_id,
@@ -515,6 +570,12 @@ export const createGeneratedAttachment = async (
   createdAt: string
 ): Promise<ChatAttachment> => {
   const db = await getDb()
+  const storedPayloads = buildStoredPayloadPair(
+    input.id,
+    input.previewUrl ?? input.dataUrl ?? null,
+    input.dataUrl ?? null
+  )
+
   db.run(
     `INSERT INTO agent_attachment (
       id, message_id, board_id, asset_id, kind, name, mime_type, preview_url, data_url, width, height, shape_id, canvas_shape_id, created_at
@@ -528,8 +589,8 @@ export const createGeneratedAttachment = async (
       $kind: 'generated-image',
       $name: input.name,
       $mimeType: input.mimeType ?? null,
-      $previewUrl: input.previewUrl ?? input.dataUrl ?? null,
-      $dataUrl: input.dataUrl ?? null,
+      $previewUrl: storedPayloads.previewUrl,
+      $dataUrl: storedPayloads.dataUrl,
       $width: input.width ?? null,
       $height: input.height ?? null,
       $canvasShapeId: input.canvasShapeId ?? null,
@@ -745,6 +806,66 @@ export const getActiveRunByBoard = async (boardId: string): Promise<StoredRun | 
     { $boardId: boardId }
   )
 
+  if (run && isAgentRunStale(run.updated_at)) {
+    const updatedAt = nowIso()
+
+    db.run(
+      `UPDATE agent_run
+          SET status = 'failed',
+              error = $error,
+              updated_at = $updatedAt
+        WHERE id = $runId`,
+      {
+        $error: STALE_RUN_ERROR,
+        $updatedAt: updatedAt,
+        $runId: run.id,
+      }
+    )
+
+    if (run.assistant_message_id) {
+      const assistantMessage = db.get<{
+        id: string
+        text: string
+        status: ChatMessageStatus
+      }>(
+        `SELECT id, text, status
+           FROM agent_message
+          WHERE id = $messageId`,
+        { $messageId: run.assistant_message_id }
+      )
+
+      if (assistantMessage && assistantMessage.status !== 'completed' && assistantMessage.status !== 'failed') {
+        db.run(
+          `UPDATE agent_message
+              SET text = $text,
+                  status = 'failed',
+                  updated_at = $updatedAt
+            WHERE id = $messageId`,
+          {
+            $text: assistantMessage.text?.trim() || STALE_RUN_MESSAGE,
+            $updatedAt: updatedAt,
+            $messageId: assistantMessage.id,
+          }
+        )
+      }
+    }
+
+    db.run(
+      `UPDATE agent_message
+          SET status = 'failed',
+              updated_at = $updatedAt
+        WHERE run_id = $runId
+          AND kind = 'tool'
+          AND status IN ('pending', 'streaming')`,
+      {
+        $updatedAt: updatedAt,
+        $runId: run.id,
+      }
+    )
+
+    return null
+  }
+
   return run
     ? {
         id: run.id,
@@ -763,5 +884,5 @@ export const getActiveRunByBoard = async (boardId: string): Promise<StoredRun | 
 
 export const getAssetDataUrl = async (assetId: string): Promise<string | null> => {
   const row = await getAssetRow(assetId)
-  return row?.data_url ?? null
+  return resolvePayloadValue(row?.data_url) ?? null
 }

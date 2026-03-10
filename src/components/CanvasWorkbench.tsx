@@ -64,18 +64,18 @@ import {
   fetchSessionMessages,
   sendAgentMessage,
 } from '../lib/agentChatClient'
-import { applyAgentStreamEvent, getChatStatusSummary, upsertChatMessage } from '../lib/agentChatState'
 import {
-  buildComposerSelectionDraft,
-  buildLegacyChatPrompt,
-  buildSelectionContext,
-} from '../lib/agentChatSelection'
+  buildAgentMessageRequest,
+  canSubmitAgentChat,
+  submitSidebarComposer,
+} from '../lib/agentChatComposer'
+import { applyAgentStreamEvent, getChatStatusSummary, upsertChatMessage } from '../lib/agentChatState'
+import { buildComposerSelectionDraft } from '../lib/agentChatSelection'
 import type {
   AgentStreamEvent,
   CanvasInsertHint,
   ChatAttachment,
   ChatMessage,
-  ChatSelectionContext,
   ChatSession,
 } from '../lib/agentChatTypes'
 
@@ -1055,9 +1055,12 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
     return '请输入你的设计需求'
   }, [activePresetDefinition.placeholder, assistantMode, composerSelectionDraft?.kind])
-  const canSubmitChat = Boolean(
-    (sidebarPrompt.trim() || composerSelectionDraft) && !chatRunId && !chatSubmitting
-  )
+  const canSubmitChat = canSubmitAgentChat({
+    promptText: sidebarPrompt,
+    selectionDraft: composerSelectionDraft,
+    chatRunId,
+    chatSubmitting,
+  })
   const canSubmitSidebarPrompt = assistantMode === 'image-edit'
   const canGenerateSidebar = canSubmitSidebarPrompt && !!sidebarPrompt.trim()
   const generatorBusy =
@@ -1910,6 +1913,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       if (!attachment.canvasShapeId) return
       const shape = editor.getShape<TLImageShape>(attachment.canvasShapeId as TLImageShape['id'])
       if (!shape) return
+      setDismissedSelectionKey(null)
       editor.setSelectedShapes([shape.id])
       focusSidebarPromptInput()
     },
@@ -2073,37 +2077,17 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           uploadedAssetId = asset.id
         }
 
-        let selectionContext: ChatSelectionContext | null = null
-
-        if (nextSelectionDraft) {
-          const builtSelectionContext = buildSelectionContext(
-            nextSelectionDraft,
-            board.id,
-            uploadedAssetId
-          )
-
-          if (builtSelectionContext) {
-            selectionContext = {
-              ...builtSelectionContext,
-              insertHint: insertHint ?? nextSelectionDraft.insertHint ?? null,
-            }
-          }
-        } else if (insertHint) {
-          selectionContext = {
+        const response = await sendAgentMessage(
+          board.id,
+          buildAgentMessageRequest({
             boardId: board.id,
-            selectedShapeIds: [],
-            selectedImageShapeIds: [],
-            sourceKind: 'none',
+            promptText: nextPrompt,
+            selectionDraft: nextSelectionDraft,
+            uploadedAssetId,
             insertHint,
-          }
-        }
-
-        const response = await sendAgentMessage(board.id, {
-          text: nextPrompt,
-          attachments: uploadedAssetId ? [{ assetId: uploadedAssetId }] : [],
-          selectionContext,
-          clientMessageId: createTaskId(),
-        })
+            clientMessageId: createTaskId(),
+          })
+        )
 
         setChatSession(response.session)
         setChatRunId(response.runId)
@@ -3041,6 +3025,18 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [enqueueSidebarTask]
   )
 
+  const handleChatFormSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      void submitSidebarComposer({
+        surface: 'chat-panel',
+        sendAgentTurn: sendChatTurn,
+        enqueueLegacyTask: enqueueSidebarTask,
+      })
+    },
+    [enqueueSidebarTask, sendChatTurn]
+  )
+
   const handleGeneratorFormSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
@@ -3063,6 +3059,20 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       }
     },
     [enqueueSidebarTask]
+  )
+
+  const handleChatPromptKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        void submitSidebarComposer({
+          surface: 'chat-panel',
+          sendAgentTurn: sendChatTurn,
+          enqueueLegacyTask: enqueueSidebarTask,
+        })
+      }
+    },
+    [enqueueSidebarTask, sendChatTurn]
   )
 
   const handleGeneratorPromptKeyDown = useCallback(
@@ -3704,8 +3714,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
             statusText={chatStatusText}
             error={sidebarError || chatError}
             onComposerChange={handleSidebarPromptChange}
-            onComposerKeyDown={handleSidebarPromptKeyDown}
-            onSubmit={handleSidebarFormSubmit}
+            onComposerKeyDown={handleChatPromptKeyDown}
+            onSubmit={handleChatFormSubmit}
             onRemoveSelectionDraft={() => setDismissedSelectionKey(selectedShapeIdsKey || '__empty__')}
             onLocateAttachment={handleLocateChatAttachment}
             onReuseAttachment={handleReuseChatAttachment}

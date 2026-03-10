@@ -70,6 +70,8 @@ const handleCreateAsset = async (req: IncomingMessage, res: ServerResponse) => {
 }
 
 const handleListMessages = async (boardId: string, res: ServerResponse) => {
+  await getActiveRunByBoard(boardId)
+
   const existingSession = await getLatestSessionByBoard(boardId)
   const session =
     existingSession ??

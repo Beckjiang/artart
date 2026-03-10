@@ -121,6 +121,65 @@ describe('applyAgentStreamEvent', () => {
     })
     expect(next[0]?.canvasInsertHint).toMatchObject({ mode: 'center' })
   })
+
+  it('preserves generated attachments across started-result-completed message flow', () => {
+    const events: AgentStreamEvent[] = [
+      {
+        type: 'message.started',
+        runId: 'run-2',
+        boardId: 'board-1',
+        message: baseMessage,
+      },
+      {
+        type: 'canvas.result.created',
+        runId: 'run-2',
+        boardId: 'board-1',
+        messageId: 'message-1',
+        insertHint: {
+          mode: 'image-edit',
+          sourceShapeId: 'shape:image-1',
+          outputWidth: 640,
+          outputHeight: 480,
+        },
+        attachment: {
+          id: 'attachment-2',
+          kind: 'generated-image',
+          name: 'result-2',
+          canvasShapeId: 'shape:generated-2',
+        },
+      },
+      {
+        type: 'message.completed',
+        runId: 'run-2',
+        boardId: 'board-1',
+        message: {
+          ...baseMessage,
+          text: '我已经基于参考图生成了新的结果。',
+          status: 'completed',
+        },
+      },
+    ]
+
+    const reduced = events.reduce(applyAgentStreamEvent, [] as ChatMessage[])
+    expect(reduced).toHaveLength(1)
+    expect(reduced[0]).toMatchObject({
+      id: 'message-1',
+      status: 'completed',
+      text: '我已经基于参考图生成了新的结果。',
+      canvasInsertHint: {
+        mode: 'image-edit',
+        sourceShapeId: 'shape:image-1',
+      },
+    })
+    expect(reduced[0]?.attachments).toEqual([
+      {
+        id: 'attachment-2',
+        kind: 'generated-image',
+        name: 'result-2',
+        canvasShapeId: 'shape:generated-2',
+      },
+    ])
+  })
 })
 
 describe('getChatStatusSummary', () => {
