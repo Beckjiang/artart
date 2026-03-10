@@ -2183,12 +2183,58 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     const prompt = buildCameraAnglePrompt(cameraDraftView, cameraSourceSize, cameraAngleMode)
     const activeSourceShapeId = cameraSourceShapeId
 
+    if (!activeSourceShapeId) {
+      setCameraRunStatus('failed')
+      setCameraError('???????????')
+      return
+    }
+
+    const liveShape = editor.getShape<TLImageShape>(activeSourceShapeId)
+    if (!liveShape || liveShape.type !== 'image') {
+      setCameraRunStatus('failed')
+      setCameraError('????????????')
+      return
+    }
+
+    const selectedBounds = editor.getShapePageBounds(liveShape)
+    const placement = getInsertPlacement('image-edit', {
+      viewportBounds: editor.getViewportPageBounds(),
+      selectedImage: {
+        shapeId: liveShape.id,
+        x: liveShape.x,
+        y: liveShape.y,
+        width: liveShape.props.w,
+        height: liveShape.props.h,
+        bounds: selectedBounds
+          ? {
+              minY: selectedBounds.minY,
+              maxX: selectedBounds.maxX,
+            }
+          : undefined,
+      },
+      insertGap: INSERT_GAP,
+    })
+
+    const placeholderShapeId = createPlaceholderShape(
+      '????',
+      placement.width,
+      placement.height,
+      placement.insertX,
+      placement.insertY,
+      {
+        canvasRole: GENERATED_IMAGE_ROLE,
+      }
+    )
+
+    selectAndRevealShape(placeholderShapeId)
+
     setCameraAbortController(controller)
     setCameraRunStatus('running')
     setCameraError('')
 
     try {
       const generated = await generateImageFromPrompt({
+        runId: String(sessionId),
         prompt,
         width: cameraSourceSize.width,
         height: cameraSourceSize.height,
@@ -2214,51 +2260,38 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         if (isAbortError(error)) throw error
       }
 
-      if (cameraAngleSessionRef.current !== sessionId) return
-      if (!activeSourceShapeId) {
-        setCameraRunStatus('failed')
-        setCameraError('未找到原图，无法插入结果。')
+      if (cameraAngleSessionRef.current !== sessionId) {
+        updateTaskStatusPlaceholder(placeholderShapeId, '???', placement.width, placement.height)
         return
       }
 
-      const liveShape = editor.getShape<TLImageShape>(activeSourceShapeId)
-      if (!liveShape || liveShape.type !== 'image') {
-        setCameraRunStatus('failed')
-        setCameraError('原图已不存在，无法插入结果。')
-        return
-      }
-
-      const selectedBounds = editor.getShapePageBounds(liveShape)
-      const placement = getInsertPlacement('image-edit', {
-        viewportBounds: editor.getViewportPageBounds(),
-        selectedImage: {
-          shapeId: liveShape.id,
-          x: liveShape.x,
-          y: liveShape.y,
-          width: liveShape.props.w,
-          height: liveShape.props.h,
-          bounds: selectedBounds
-            ? {
-                minY: selectedBounds.minY,
-                maxX: selectedBounds.maxX,
-              }
-            : undefined,
-        },
-        insertGap: INSERT_GAP,
-      })
-
-      const insertedShapeId = createImageShape({
+      const replaced = replaceImageShapeAsset({
+        shapeId: placeholderShapeId,
         name: 'multi-angle-result',
         imageUrl: nextImageUrl,
         mimeType: nextMimeType,
         width: placement.width,
         height: placement.height,
-        x: placement.insertX,
-        y: placement.insertY,
         altText: prompt,
       })
 
-      selectAndRevealShape(insertedShapeId)
+      const resultShapeId =
+        replaced ??
+        createImageShape({
+          name: 'multi-angle-result',
+          imageUrl: nextImageUrl,
+          mimeType: nextMimeType,
+          width: placement.width,
+          height: placement.height,
+          x: placement.insertX,
+          y: placement.insertY,
+          altText: prompt,
+          meta: {
+            canvasRole: GENERATED_IMAGE_ROLE,
+          },
+        })
+
+      selectAndRevealShape(resultShapeId)
 
       const updated = touchBoard(board.id)
       if (updated) {
@@ -2267,15 +2300,22 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       resetCameraAngleDialog()
     } catch (error) {
+      const aborted = controller.signal.aborted || isAbortError(error)
+      if (aborted) {
+        updateTaskStatusPlaceholder(placeholderShapeId, '???', placement.width, placement.height)
+      } else {
+        updateTaskStatusPlaceholder(placeholderShapeId, '????', placement.width, placement.height)
+      }
+
       if (cameraAngleSessionRef.current !== sessionId) return
-      if (controller.signal.aborted || isAbortError(error)) {
+      if (aborted) {
         setCameraRunStatus('idle')
         setCameraError('')
         return
       }
 
       setCameraRunStatus('failed')
-      setCameraError(error instanceof Error ? error.message : '多角度生成失败，请稍后重试')
+      setCameraError(error instanceof Error ? error.message : '?????????????')
     } finally {
       if (cameraAngleSessionRef.current === sessionId) {
         setCameraAbortController(null)
@@ -2291,10 +2331,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     cameraSourceShapeId,
     cameraSourceSize,
     createImageShape,
+    createPlaceholderShape,
     editor,
     onBoardMetaChange,
+    replaceImageShapeAsset,
     resetCameraAngleDialog,
     selectAndRevealShape,
+    updateTaskStatusPlaceholder,
   ])
 
   const resetMultiAnglePanel = useCallback(() => {
@@ -2457,6 +2500,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       try {
         const generated = await generateImageFromPrompt({
+          runId: String(taskId),
           prompt: task.prompt,
           width: task.width,
           height: task.height,

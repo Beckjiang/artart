@@ -1,4 +1,11 @@
 import { generateImageWithGateway } from '../../modelGateway'
+import type { ImageApiCallLogRecord } from '../../src/lib/imageApiCallLog'
+import {
+  parseBooleanLike,
+  redactHeaders,
+  redactImageApiPayload,
+} from '../../src/lib/imageApiCallLog'
+import { appendImageApiCallLogBestEffort } from '../imageApiCallLogWriter'
 import type { CanvasInsertHint } from '../../src/lib/agentChatTypes'
 import { getEnvValue, hasGeminiImageConfig } from './env'
 
@@ -8,6 +15,7 @@ type GeminiImageResult = {
 }
 
 type RunImageToolParams = {
+  runId?: string
   prompt: string
   insertHint?: CanvasInsertHint | null
   referenceDataUrls?: string[]
@@ -20,6 +28,7 @@ type GeminiInlineData = {
 }
 
 type GeminiPart = {
+  text?: string
   inlineData?: GeminiInlineData
   inline_data?: GeminiInlineData
 }
@@ -207,7 +216,8 @@ const fetchAsDataPart = async (input: string) => {
 const requestGeminiImage = async (
   prompt: string,
   insertHint?: CanvasInsertHint | null,
-  referenceDataUrls: string[] = []
+  referenceDataUrls: string[] = [],
+  runId?: string
 ): Promise<GeminiImageResult> => {
   const apiKey = getEnvValue('VITE_GEMINI_API_KEY') || getEnvValue('VITE_UNIAPI_API_KEY')
   if (!apiKey) {
@@ -235,70 +245,118 @@ const requestGeminiImage = async (
     })
   )
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      ...buildGeminiRequestHeaders(baseUrl, apiKey),
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              text:
-                prompt.trim() ||
-                (referenceParts.length > 0 ? 'Edit this image.' : 'Generate an image.'),
-            },
-            ...referenceParts,
-          ],
-        },
-      ],
-      generationConfig: {
-        responseModalities: ['TEXT', 'IMAGE'],
-        imageConfig: {
-          aspectRatio,
-          imageSize,
-        },
+  const envOverride = parseBooleanLike(getEnvValue('VITE_DEBUG_IMAGE_API_LOG'))
+  const nodeEnv = process.env.NODE_ENV
+  const logEnabled =
+    envOverride ?? (nodeEnv === 'test' ? false : nodeEnv !== 'production')
+  const resolvedRunId = runId?.trim() || `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const createdAt = new Date().toISOString()
+  const started = Date.now()
+
+  const requestHeaders = buildGeminiRequestHeaders(baseUrl, apiKey)
+  const requestBody = {
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            text:
+              prompt.trim() ||
+              (referenceParts.length > 0 ? 'Edit this image.' : 'Generate an image.'),
+          },
+          ...referenceParts,
+        ],
       },
-    }),
-  })
-
-  const rawText = await response.text()
-  const requestId = response.headers.get('x-oneapi-request-id')
-
-  let payload: GeminiResponsePayload = {}
-  if (rawText.trim()) {
-    try {
-      payload = JSON.parse(rawText) as GeminiResponsePayload
-    } catch {
-      payload = {}
-    }
+    ],
+    generationConfig: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      imageConfig: {
+        aspectRatio,
+        imageSize,
+      },
+    },
   }
 
-  if (!response.ok) {
-    const upstreamMessage = payload.error?.message?.trim() || ''
-    const rawPreview = rawText.trim().slice(0, 200)
-    const baseErrorMessage = upstreamMessage || rawPreview
-    const detailedMessage = buildGeminiHttpError({
+  const finalPrompt = (() => {
+    const parts = requestBody.contents?.[0]?.parts ?? []
+    for (const part of parts) {
+      const text = (part as { text?: unknown }).text
+      if (typeof text === 'string' && text.trim()) {
+        return text
+      }
+    }
+
+    return prompt
+  })()
+
+  const redactedRequestHeaders = redactHeaders(requestHeaders)
+  const redactedRequestBody = redactImageApiPayload(requestBody)
+
+  if (logEnabled) {
+    console.info('[image-api] request', {
+      runId: resolvedRunId,
+      provider: 'gemini',
       endpoint,
-      status: response.status,
-      requestId,
-      upstreamMessage: upstreamMessage || undefined,
-      rawPreview: upstreamMessage ? undefined : rawPreview,
+      prompt: finalPrompt,
+      model: imageModel,
+      imageSize,
+      aspectRatio,
+      referenceImageCount: referenceParts.length,
+      request: {
+        headers: redactedRequestHeaders,
+        body: redactedRequestBody,
+      },
+    })
+  }
+
+  let response: Response | null = null
+  let rawText: string | undefined
+  let payload: GeminiResponsePayload = {}
+  let errorMessage: string | undefined
+
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        ...requestHeaders,
+      },
+      body: JSON.stringify(requestBody),
     })
 
-    if (referenceParts.length > 0 && isLikelyImageEditingUnsupported(baseErrorMessage)) {
-      throw new Error(
-        `The gateway returned "${IMAGE_TO_IMAGE_FAILURE_MESSAGE}" for image-to-image. ` +
-          `This usually means ${baseUrl} (model: ${imageModel}) does not support reference-image editing. ` +
-          'Text-to-image can still work; switch to a gateway/model that supports image editing. ' +
-          `Original error: ${baseErrorMessage || `HTTP ${response.status}`}. ${detailedMessage}`
-      )
+    rawText = await response.text()
+    const requestId = response.headers.get('x-oneapi-request-id')
+
+    if (rawText.trim()) {
+      try {
+        payload = JSON.parse(rawText) as GeminiResponsePayload
+      } catch {
+        payload = {}
+      }
     }
 
-    throw new Error(detailedMessage)
-  }
+    if (!response.ok) {
+      const upstreamMessage = payload.error?.message?.trim() || ''
+      const rawPreview = rawText.trim().slice(0, 200)
+      const baseErrorMessage = upstreamMessage || rawPreview
+      const detailedMessage = buildGeminiHttpError({
+        endpoint,
+        status: response.status,
+        requestId,
+        upstreamMessage: upstreamMessage || undefined,
+        rawPreview: upstreamMessage ? undefined : rawPreview,
+      })
+
+      if (referenceParts.length > 0 && isLikelyImageEditingUnsupported(baseErrorMessage)) {
+        throw new Error(
+          `The gateway returned "${IMAGE_TO_IMAGE_FAILURE_MESSAGE}" for image-to-image. ` +
+            `This usually means ${baseUrl} (model: ${imageModel}) does not support reference-image editing. ` +
+            'Text-to-image can still work; switch to a gateway/model that supports image editing. ' +
+            `Original error: ${baseErrorMessage || `HTTP ${response.status}`}. ${detailedMessage}`
+        )
+      }
+
+      throw new Error(detailedMessage)
+    }
 
   const allParts = payload.candidates?.flatMap((candidate) => candidate.content?.parts ?? []) ?? []
   const imagePart = allParts.find((part) => Boolean(getInlineData(part)?.data))
@@ -323,16 +381,74 @@ const requestGeminiImage = async (
     dataUrl: `data:${mimeType};base64,${data}`,
     mimeType,
   }
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error)
+    throw error
+  } finally {
+    const latencyMs = Date.now() - started
+    if (logEnabled) {
+      const record: ImageApiCallLogRecord = {
+        schemaVersion: 1,
+        runId: resolvedRunId,
+        createdAt,
+        source: 'server-agent',
+        provider: 'gemini',
+        prompt: {
+          input: prompt,
+          final: finalPrompt,
+        },
+        meta: {
+          model: imageModel,
+          imageSize,
+          aspectRatio,
+          referenceImageCount: referenceParts.length,
+        },
+        request: {
+          endpoint,
+          method: 'POST',
+          headers: redactedRequestHeaders,
+          body: redactedRequestBody,
+        },
+        response: response
+          ? {
+              status: response.status,
+              ok: response.ok,
+              headers: redactHeaders(response.headers),
+              body: redactImageApiPayload(
+                rawText && rawText.trim()
+                  ? (() => {
+                      try {
+                        return JSON.parse(rawText) as unknown
+                      } catch {
+                        return { raw: rawText.trim().slice(0, 400) }
+                      }
+                    })()
+                  : payload
+              ),
+            }
+          : undefined,
+        latencyMs,
+        ...(errorMessage ? { error: errorMessage } : {}),
+      }
+
+      console.info('[image-api] completed', record)
+      void appendImageApiCallLogBestEffort({
+        runId: resolvedRunId,
+        record,
+      })
+    }
+  }
 }
 
 export const runTextToImageTool = async ({
+  runId,
   prompt,
   insertHint,
 }: RunImageToolParams): Promise<GeminiImageResult & { width: number; height: number }> => {
   const dimensions = resolveDimensions(insertHint)
 
   if (hasGeminiImageConfig()) {
-    const result = await requestGeminiImage(prompt, insertHint)
+    const result = await requestGeminiImage(prompt, insertHint, [], runId)
     return {
       ...result,
       ...dimensions,
@@ -362,6 +478,7 @@ export const runTextToImageTool = async ({
 }
 
 export const runImageToImageTool = async ({
+  runId,
   prompt,
   insertHint,
   referenceDataUrls = [],
@@ -375,7 +492,7 @@ export const runImageToImageTool = async ({
   }
 
   const dimensions = resolveDimensions(insertHint)
-  const result = await requestGeminiImage(prompt, insertHint, referenceDataUrls)
+  const result = await requestGeminiImage(prompt, insertHint, referenceDataUrls, runId)
   return {
     ...result,
     ...dimensions,

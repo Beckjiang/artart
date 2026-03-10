@@ -1,5 +1,12 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import type { ImageApiCallLogRecord } from './src/lib/imageApiCallLog'
+import {
+  parseBooleanLike,
+  redactHeaders,
+  redactImageApiPayload,
+} from './src/lib/imageApiCallLog'
+import { appendImageApiCallLogBestEffort } from './server/imageApiCallLogWriter'
 
 type ModelProviderType = 'llm' | 'image'
 type GenerationJobType = 'topic' | 'copy' | 'image'
@@ -272,25 +279,119 @@ const callImageApi = async (
   }>
 }> => {
   const baseUrl = normalizeBaseUrl(getEnvValue('OPENAI_BASE_URL'))
-  const response = await fetch(`${baseUrl}/images/generations`, {
-    method: 'POST',
-    headers: buildHeaders(),
-    body: JSON.stringify({
-      model: provider.model,
-      prompt: request.prompt,
-      n: request.n ?? 3,
-      size: request.size ?? '1024x1024',
-      response_format: 'b64_json'
-    })
-  })
+  const size = request.size ?? '1024x1024'
+  const sizeMatch = /^\s*(\d+)\s*x\s*(\d+)\s*$/i.exec(size)
+  const width = sizeMatch ? Number(sizeMatch[1]) : undefined
+  const height = sizeMatch ? Number(sizeMatch[2]) : undefined
+  const aspectRatio = (() => {
+    if (!width || !height) return undefined
+    const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
+    const divisor = gcd(width, height)
+    return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`
+  })()
 
-  const payload = await parseJsonSafely(response)
-  if (!response.ok) {
-    const message = (payload.error as Record<string, unknown> | undefined)?.message
-    throw new Error(typeof message === 'string' ? message : `http_${response.status}`)
+  const endpoint = `${baseUrl}/images/generations`
+  const requestHeaders = buildHeaders()
+  const requestBody = {
+    model: provider.model,
+    prompt: request.prompt,
+    n: request.n ?? 3,
+    size,
+    response_format: 'b64_json',
   }
 
-  const dataRows = Array.isArray(payload.data) ? payload.data : []
+  const envOverride = parseBooleanLike(getEnvValue('VITE_DEBUG_IMAGE_API_LOG'))
+  const nodeEnv = process.env.NODE_ENV
+  const logEnabled =
+    envOverride ?? (nodeEnv === 'test' ? false : nodeEnv !== 'production')
+  const runId = request.jobId
+  const createdAt = new Date().toISOString()
+  const started = Date.now()
+  const redactedRequestHeaders = redactHeaders(requestHeaders)
+  const redactedRequestBody = redactImageApiPayload(requestBody)
+
+  if (logEnabled) {
+    console.info('[image-api] request', {
+      runId,
+      provider: 'openai',
+      endpoint,
+      prompt: request.prompt,
+      model: provider.model,
+      size: request.size ?? '1024x1024',
+      n: request.n ?? 3,
+      request: {
+        headers: redactedRequestHeaders,
+        body: redactedRequestBody,
+      },
+    })
+  }
+
+  let response: Response | null = null
+  let payload: Record<string, unknown> | undefined = undefined
+  let errorMessage: string | undefined
+
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody),
+    })
+
+    payload = await parseJsonSafely(response)
+    if (!response.ok) {
+      const message = (payload.error as Record<string, unknown> | undefined)?.message
+      throw new Error(typeof message === 'string' ? message : `http_${response.status}`)
+    }
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error)
+    throw error
+  } finally {
+    const latencyMs = Date.now() - started
+    if (logEnabled) {
+      const record: ImageApiCallLogRecord = {
+        schemaVersion: 1,
+        runId,
+        createdAt,
+        source: 'modelGateway',
+        provider: 'openai',
+        prompt: {
+          input: request.prompt,
+          final: request.prompt,
+        },
+        meta: {
+          model: provider.model,
+          imageSize: size,
+          width,
+          height,
+          aspectRatio,
+        },
+        request: {
+          endpoint,
+          method: 'POST',
+          headers: redactedRequestHeaders,
+          body: redactedRequestBody,
+        },
+        response: response
+          ? {
+              status: response.status,
+              ok: response.ok,
+              headers: redactHeaders(response.headers),
+              body: payload ? redactImageApiPayload(payload) : undefined,
+            }
+          : undefined,
+        latencyMs,
+        ...(errorMessage ? { error: errorMessage } : {}),
+      }
+
+      console.info('[image-api] completed', record)
+      void appendImageApiCallLogBestEffort({
+        runId,
+        record,
+      })
+    }
+  }
+
+  const dataRows = Array.isArray(payload?.data) ? payload.data : []
   const images = dataRows
     .map((item) => (typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : null))
     .filter((item): item is Record<string, unknown> => item !== null)

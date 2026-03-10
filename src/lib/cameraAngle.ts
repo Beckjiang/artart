@@ -262,6 +262,8 @@ export const buildCameraAnglePrompt = (
     '约束 / Constraints:',
     '只改变机位/角度，不改变主体身份、服装、发型、主体数量、场景主题、主光线风格。',
     'Keep the same subject identity, outfit, hairstyle, subject count, scene theme, and main lighting style.',
+    '保持原图（或任务指定）的动作、姿势与表情不变。',
+    'Keep the original pose/action and facial expression unchanged.',
     '',
     ...actionLines,
     '',
@@ -279,4 +281,3 @@ export const buildCameraAnglePrompt = (
     'Avoid collage, split view, extra people, extra limbs, and duplicated subjects.',
   ].join('\n')
 }
-

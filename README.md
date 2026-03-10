@@ -80,6 +80,21 @@ VITE_GEMINI_IMAGE_SIZE=2K
 - 开发环境默认通过 Vite 代理 `/api/gemini -> https://generativelanguage.googleapis.com/v1beta`，减少浏览器 CORS 问题。
 - 为了平滑迁移，旧的 `VITE_UNIAPI_*` 环境变量名和 `/api/uniapi` 本地代理路径仍会自动映射到 Gemini。
 
+## 画图 API 调用日志（提示词/请求/响应可追踪）
+
+开发时默认会记录所有生图/画图外部 API 调用（Gemini `generateContent` + OpenAI/UniAPI `images/generations`），便于你复盘和优化提示词。
+
+- 控制台：会输出 `[image-api] request` / `[image-api] completed`，其中 `prompt.final` 就是最终发出去的提示词。
+- 落盘：会追加写入到 `debug-image-io/YYYYMMDD/<runId>/api-calls.json`（与 debug 图片同目录归档）。
+- 脱敏与体积控制：
+  - 任何 API key / Authorization header 均会被替换为 `<redacted>`
+  - 图片 base64（Gemini `inlineData.data` / `inline_data.data`、OpenAI `b64_json` 等）会被替换为 `<omitted base64 length=N>`
+- 开关：
+  - 默认：开发环境开启；测试环境关闭；生产环境（Node）默认关闭
+  - 强制开启/关闭：设置 `VITE_DEBUG_IMAGE_API_LOG=1` 或 `VITE_DEBUG_IMAGE_API_LOG=0`
+
+说明：浏览器侧的落盘依赖本地 Vite debug endpoint；如果是纯静态部署，落盘会 best-effort 失败但不影响生图流程（仍保留控制台日志）。
+
 ## 下一步建议
 
 1. 引入后端（`Fastify/Nest + PostgreSQL`）做账号与跨端同步

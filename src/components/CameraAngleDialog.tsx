@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react'
+import { CameraAngleOrbitPreview } from './CameraAngleOrbitPreview'
 import { CameraAngleThreePreview } from './CameraAngleThreePreview'
 import {
   DEFAULT_CAMERA_VIEW,
@@ -123,11 +124,19 @@ export function CameraAngleDialog({
       </div>
 
       <div className="multi-angle-cube">
-        <CameraAngleThreePreview
-          sourcePreviewUrl={sourcePreviewUrl}
-          cameraView={cameraView}
-          onChangeView={onChangeView}
-        />
+        {mode === 'subject' ? (
+          <CameraAngleThreePreview
+            sourcePreviewUrl={sourcePreviewUrl}
+            cameraView={cameraView}
+            onChangeView={onChangeView}
+          />
+        ) : (
+          <CameraAngleOrbitPreview
+            sourcePreviewUrl={sourcePreviewUrl}
+            cameraView={cameraView}
+            onChangeView={onChangeView}
+          />
+        )}
 
         {sourceLoading ? <div className="multi-angle-loading">准备参考图中…</div> : null}
       </div>
@@ -205,4 +214,3 @@ export function CameraAngleDialog({
     </div>
   )
 }
-

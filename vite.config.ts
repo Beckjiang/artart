@@ -5,6 +5,7 @@ import { defineConfig } from 'vite'
 import type { Connect, ViteDevServer, PreviewServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { localAgentPlugin } from './server/agent/vitePlugin'
+import { appendImageApiCallLogBestEffort } from './server/imageApiCallLogWriter'
 
 type DebugImageItem = {
   label: string
@@ -20,6 +21,7 @@ type DebugImagePayload = {
 
 const DEBUG_IMAGE_DIR = 'debug-image-io'
 const DEBUG_ENDPOINT = '/api/local-debug/save-image-set'
+const DEBUG_API_CALL_ENDPOINT = '/api/local-debug/save-image-api-call'
 const GEMINI_API_TARGET = 'https://generativelanguage.googleapis.com'
 
 const readJsonBody = async (req: Connect.IncomingMessage): Promise<unknown> => {
@@ -102,7 +104,8 @@ const formatDateDir = (date: Date) => {
 
 const createDebugImageHandler = (): Connect.NextHandleFunction => {
   return async (req, res, next) => {
-    if (req.url !== DEBUG_ENDPOINT) return next()
+    if (req.url !== DEBUG_ENDPOINT && req.url !== DEBUG_API_CALL_ENDPOINT) return next()
+
     if (req.method !== 'POST') {
       res.statusCode = 405
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -111,6 +114,40 @@ const createDebugImageHandler = (): Connect.NextHandleFunction => {
     }
 
     try {
+      if (req.url === DEBUG_API_CALL_ENDPOINT) {
+        const payload = (await readJsonBody(req)) as {
+          runId?: string
+          record?: unknown
+        }
+        const record = payload.record
+        const runId =
+          typeof payload.runId === 'string' && payload.runId.trim()
+            ? payload.runId.trim()
+            : randomUUID()
+        if (!record || typeof record !== 'object') {
+          res.statusCode = 400
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ error: 'record 不能为空' }))
+          return
+        }
+
+        const persisted = await appendImageApiCallLogBestEffort({
+          runId,
+          record,
+        })
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.end(
+          JSON.stringify({
+            runId,
+            folder: persisted?.folder || '',
+            file: persisted?.file || 'api-calls.json',
+            appended: Boolean(persisted),
+          })
+        )
+        return
+      }
+
       const payload = (await readJsonBody(req)) as DebugImagePayload
       const images = Array.isArray(payload.images) ? payload.images : []
 

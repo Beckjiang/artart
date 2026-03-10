@@ -62,6 +62,7 @@ describe('buildCameraAnglePrompt', () => {
     expect(prompt).toContain('medium shot / 中景景别')
     expect(prompt).toContain('Yaw (rotate): 40°; Pitch (tilt): -25°;')
     expect(prompt).toContain('Keep the same source aspect ratio (1280 × 720).')
+    expect(prompt).toContain('Keep the original pose/action and facial expression unchanged.')
   })
 
   it('switches key copy for subject mode', () => {
@@ -80,6 +81,6 @@ describe('buildCameraAnglePrompt', () => {
 
     expect(prompt).toContain('Rotate/tilt the subject')
     expect(prompt).toContain('Keep the same source aspect ratio (512 × 512).')
+    expect(prompt).toContain('Keep the original pose/action and facial expression unchanged.')
   })
 })
-

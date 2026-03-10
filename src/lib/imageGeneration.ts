@@ -1,3 +1,31 @@
+import { archiveDebugImageApiCall } from './debugImageApiCallArchive'
+import type { ImageApiCallLogRecord } from './imageApiCallLog'
+import {
+  parseBooleanLike,
+  redactHeaders,
+  redactImageApiPayload,
+} from './imageApiCallLog'
+
+const resolveImageApiLogEnabled = (): boolean => {
+  const env = import.meta.env as Record<string, unknown>
+  const override = parseBooleanLike(env.VITE_DEBUG_IMAGE_API_LOG)
+  const isTestMode =
+    env.MODE === 'test' ||
+    env.VITEST === true ||
+    env.VITEST === 'true' ||
+    env.NODE_ENV === 'test'
+
+  if (override !== undefined) {
+    return override
+  }
+
+  if (isTestMode) {
+    return false
+  }
+
+  return Boolean(env.DEV)
+}
+
 export const IMAGE_ASPECT_RATIOS = [
   '1:1',
   '2:3',
@@ -50,6 +78,7 @@ export const normalizeImageGenerationSize = (imageSize?: unknown): ImageGenerati
 }
 
 export type GenerateImageParams = {
+  runId?: string
   prompt: string
   width: number
   height: number
@@ -650,34 +679,122 @@ const requestGeminiImage = async (
   const endpoint = buildGeminiGenerateContentEndpoint(config.baseUrl, imageModel)
   const requestBody = await buildGeminiRequestBody(params, config, style)
 
-  if (import.meta.env.DEV) {
-    const referenceImageCount = toReferenceImageSources(params).length
-    console.info('[imageGeneration] request', {
+  const logEnabled = resolveImageApiLogEnabled()
+  const runId =
+    params.runId?.trim() ||
+    `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const createdAt = new Date().toISOString()
+  const started = Date.now()
+
+  const referenceImageCount = toReferenceImageSources(params).length
+  const finalPrompt = (() => {
+    const body = requestBody as unknown as {
+      contents?: Array<{ parts?: Array<{ text?: unknown }> }>
+    }
+    const text = body.contents?.[0]?.parts?.find((part) => typeof part?.text === 'string')
+      ?.text
+    return typeof text === 'string' && text.trim() ? text : params.prompt
+  })()
+
+  const requestHeaders = buildGeminiRequestHeaders(config.baseUrl, config.apiKey)
+  const redactedRequestHeaders = redactHeaders(requestHeaders)
+  const redactedRequestBody = redactImageApiPayload(requestBody)
+
+  if (logEnabled) {
+    console.info('[image-api] request', {
+      runId,
+      provider: 'gemini',
       endpoint,
-      baseUrl: config.baseUrl,
+      prompt: finalPrompt,
       model: imageModel,
       imageSize,
       style,
-      aspectRatio: params.aspectRatio || pickNearestImageAspectRatio(params.width, params.height),
-      authMode: isOfficialGeminiBaseUrl(config.baseUrl) ? 'x-goog-api-key' : 'bearer',
-      hasReferenceImage: referenceImageCount > 0,
       referenceImageCount,
+      request: {
+        headers: redactedRequestHeaders,
+        body: redactedRequestBody,
+      },
     })
   }
 
-  const response = await fetchWithNetworkHint(endpoint, {
-    method: 'POST',
-    headers: buildGeminiRequestHeaders(config.baseUrl, config.apiKey),
-    signal: params.signal,
-    body: JSON.stringify(requestBody),
-  })
+  let response: Response | null = null
+  let payload: unknown = undefined
+  let errorMessage: string | undefined
 
-  const payload = await readGeminiResponse(response)
-  if (!response.ok) {
-    throw new Error(payload.error?.message || `Gemini 生图请求失败（${response.status}）`)
+  try {
+    response = await fetchWithNetworkHint(endpoint, {
+      method: 'POST',
+      headers: requestHeaders,
+      signal: params.signal,
+      body: JSON.stringify(requestBody),
+    })
+
+    payload = await readGeminiResponse(response)
+    if (!response.ok) {
+      const asGeminiPayload = payload as GeminiResponse
+      throw new Error(
+        asGeminiPayload.error?.message || `Gemini 生图请求失败（${response.status}）`
+      )
+    }
+
+    return parseGeminiImage(payload as GeminiResponse)
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error)
+    throw error
+  } finally {
+    const latencyMs = Date.now() - started
+
+    if (logEnabled) {
+      const record: ImageApiCallLogRecord = {
+        schemaVersion: 1,
+        runId,
+        createdAt,
+        source: 'browser',
+        provider: 'gemini',
+        prompt: {
+          input: params.prompt,
+          final: finalPrompt,
+        },
+        meta: {
+          model: imageModel,
+          imageSize,
+          width: params.width,
+          height: params.height,
+          aspectRatio:
+            params.aspectRatio || pickNearestImageAspectRatio(params.width, params.height),
+          style,
+          referenceImageCount,
+        },
+        request: {
+          endpoint,
+          method: 'POST',
+          headers: redactedRequestHeaders,
+          body: redactedRequestBody,
+        },
+        response: response
+          ? {
+              status: response.status,
+              ok: response.ok,
+              headers: redactHeaders(response.headers),
+              body: payload === undefined ? undefined : redactImageApiPayload(payload),
+            }
+          : undefined,
+        latencyMs,
+        ...(errorMessage ? { error: errorMessage } : {}),
+      }
+
+      console.info('[image-api] completed', record)
+      void archiveDebugImageApiCall({
+        runId,
+        record,
+      }).catch((archiveError) => {
+        console.warn(
+          '[image-api] failed to persist api call log',
+          archiveError instanceof Error ? archiveError.message : archiveError
+        )
+      })
+    }
   }
-
-  return parseGeminiImage(payload)
 }
 
 export async function generateImageFromPrompt(

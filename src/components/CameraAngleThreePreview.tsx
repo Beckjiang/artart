@@ -191,6 +191,41 @@ export function CameraAngleThreePreview({ sourcePreviewUrl, cameraView, onChange
         texture.minFilter = THREE.LinearFilter
         texture.magFilter = THREE.LinearFilter
 
+        const image = texture.image as
+          | {
+              width?: number
+              height?: number
+              naturalWidth?: number
+              naturalHeight?: number
+              videoWidth?: number
+              videoHeight?: number
+            }
+          | undefined
+
+        const imageWidth = image?.naturalWidth ?? image?.videoWidth ?? image?.width
+        const imageHeight = image?.naturalHeight ?? image?.videoHeight ?? image?.height
+
+        if (imageWidth && imageHeight) {
+          const aspect = imageWidth / imageHeight
+
+          let repeatX = 1
+          let repeatY = 1
+          let offsetX = 0
+          let offsetY = 0
+
+          if (aspect > 1) {
+            repeatX = 1 / aspect
+            offsetX = (1 - repeatX) / 2
+          } else if (aspect < 1) {
+            repeatY = aspect
+            offsetY = (1 - repeatY) / 2
+          }
+
+          texture.repeat.set(repeatX, repeatY)
+          texture.offset.set(offsetX, offsetY)
+          texture.needsUpdate = true
+        }
+
         const faceMaterial = cubeRef.current.material[4]
         const previousMap = faceMaterial.map
         if (previousMap && previousMap !== texture) {
@@ -236,7 +271,7 @@ export function CameraAngleThreePreview({ sourcePreviewUrl, cameraView, onChange
         depthProgress: nextDepth,
       }
 
-      cube.rotation.y = THREE.MathUtils.degToRad(nextYaw)
+      cube.rotation.y = THREE.MathUtils.degToRad(-nextYaw)
       cube.rotation.x = THREE.MathUtils.degToRad(nextPitch)
       const scale = 1.05 - nextDepth * 0.12
       cube.scale.setScalar(scale)
@@ -281,8 +316,10 @@ export function CameraAngleThreePreview({ sourcePreviewUrl, cameraView, onChange
       const deltaX = (event.clientX - dragState.startX) / Math.max(1, rect.width)
       const deltaY = (event.clientY - dragState.startY) / Math.max(1, rect.height)
 
-      const yawDeg = dragState.startYawDeg + deltaX * 180
-      const pitchDeg = dragState.startPitchDeg - deltaY * 110
+      // Drag direction should feel like "grabbing" the cube:
+      // dragging right should rotate the cube to show its left side.
+      const yawDeg = dragState.startYawDeg - deltaX * 180
+      const pitchDeg = dragState.startPitchDeg + deltaY * 110
       const next = clampCameraView({
         yawDeg,
         pitchDeg,

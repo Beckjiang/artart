@@ -210,11 +210,13 @@ export const processAgentRun = async ({
     const result =
       action.type === 'image_to_image'
         ? await runImageToImageTool({
+            runId,
             prompt: action.toolPrompt,
             insertHint: selectionContext?.insertHint,
             referenceDataUrls: await resolveReferenceDataUrls(userMessage.attachments),
           })
         : await runTextToImageTool({
+            runId,
             prompt: action.toolPrompt,
             insertHint: selectionContext?.insertHint,
           })
