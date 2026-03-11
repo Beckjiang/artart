@@ -8,7 +8,7 @@ import type {
   ReactNode,
 } from 'react'
 import { AssetRecordType, createShapeId, useEditor, useTools } from 'tldraw'
-import type { TLImageShape, TLImageShapeProps, TLShapeId } from 'tldraw'
+import type { TLBinding, TLImageShape, TLImageShapeProps, TLShapeId } from 'tldraw'
 import { archiveDebugImages } from '../../lib/debugImageArchive'
 import { touchBoard } from '../../lib/boards'
 import {
@@ -100,6 +100,9 @@ import {
   isGeneratorShape,
   isTaskTargetRemovedError,
   maybePadImageToTargetRatio,
+  normalizeCreatedTextShapeForWorkbench,
+  shouldBringCreatedArrowToFrontInWorkbench,
+  shouldRemoveArrowImageBindingInWorkbench,
 
 } from './helpers'
 import { useWorkbenchSelectionState } from './hooks/useWorkbenchSelectionState'
@@ -182,6 +185,86 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
   const cameraAngleSessionRef = useRef(0)
   const chatEventSourceRef = useRef<EventSource | null>(null)
   const activeMaskPointerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const getCurrentWorkbenchToolId = () => String(editor.getCurrentToolId()).split('.')[0]
+    const removeArrowImageBindingIfNeeded = (
+      binding: TLBinding,
+      source: 'remote' | 'user'
+    ) => {
+      const fromShape = editor.getShape(binding.fromId)
+      const toShape = editor.getShape(binding.toId)
+
+      if (!shouldRemoveArrowImageBindingInWorkbench(binding, source, fromShape, toShape)) {
+        return
+      }
+
+      editor.deleteBinding(binding.id)
+      editor.bringToFront([binding.fromId])
+    }
+    const cleanupExistingArrowImageBindings = () => {
+      const bindingsToDelete = new Map<string, TLBinding>()
+      const arrowIdsToBringToFront = new Set<TLShapeId>()
+
+      for (const shape of editor.getCurrentPageShapes()) {
+        if (shape.type !== 'image') continue
+
+        for (const binding of editor.getBindingsToShape(shape, 'arrow')) {
+          const fromShape = editor.getShape(binding.fromId)
+
+          if (binding.type !== 'arrow' || fromShape?.type !== 'arrow') {
+            continue
+          }
+
+          bindingsToDelete.set(binding.id, binding)
+          arrowIdsToBringToFront.add(binding.fromId)
+        }
+      }
+
+      if (bindingsToDelete.size === 0) return
+
+      editor.run(() => {
+        editor.deleteBindings([...bindingsToDelete.values()])
+        if (arrowIdsToBringToFront.size > 0) {
+          editor.bringToFront([...arrowIdsToBringToFront])
+        }
+      }, { history: 'ignore' })
+    }
+
+    const disposeBeforeCreate = editor.sideEffects.registerBeforeCreateHandler('shape', (shape, source) =>
+      normalizeCreatedTextShapeForWorkbench(shape, source, getCurrentWorkbenchToolId())
+    )
+
+    const disposeAfterCreate = editor.sideEffects.registerAfterCreateHandler('shape', (shape, source) => {
+      if (!shouldBringCreatedArrowToFrontInWorkbench(shape, source, getCurrentWorkbenchToolId())) {
+        return
+      }
+
+      editor.run(() => {
+        editor.bringToFront([shape.id])
+      }, { history: 'ignore' })
+    })
+
+    const disposeBindingAfterCreate = editor.sideEffects.registerAfterCreateHandler('binding', (binding, source) => {
+      removeArrowImageBindingIfNeeded(binding, source)
+    })
+
+    const disposeBindingAfterChange = editor.sideEffects.registerAfterChangeHandler(
+      'binding',
+      (_prev, binding, source) => {
+        removeArrowImageBindingIfNeeded(binding, source)
+      }
+    )
+
+    cleanupExistingArrowImageBindings()
+
+    return () => {
+      disposeBindingAfterChange()
+      disposeBindingAfterCreate()
+      disposeAfterCreate()
+      disposeBeforeCreate()
+    }
+  }, [editor])
 
   useEffect(() => {
     tasksRef.current = tasks
@@ -2567,6 +2650,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           break
         case 'rectangle':
           tools.rectangle.onSelect('toolbar')
+          break
+        case 'arrow':
+          tools.arrow.onSelect('toolbar')
           break
         case 'text':
           tools.text.onSelect('toolbar')

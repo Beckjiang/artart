@@ -1,4 +1,13 @@
-import { Frame, Image, MousePointer2, Pencil, RectangleHorizontal, Sparkles, Type } from 'lucide-react'
+import {
+  ArrowRight,
+  Frame,
+  Image,
+  MousePointer2,
+  Pencil,
+  RectangleHorizontal,
+  Sparkles,
+  Type,
+} from 'lucide-react'
 import type { ToolIconId } from '../types'
 
 export function ToolbarIcon({ icon }: { icon: ToolIconId }) {
@@ -11,6 +20,8 @@ export function ToolbarIcon({ icon }: { icon: ToolIconId }) {
       return <Frame {...commonProps} />
     case 'rectangle':
       return <RectangleHorizontal {...commonProps} />
+    case 'arrow':
+      return <ArrowRight {...commonProps} />
     case 'text':
       return <Type {...commonProps} />
     case 'draw':

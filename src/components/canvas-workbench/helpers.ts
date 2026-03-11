@@ -1,4 +1,4 @@
-import type { TLImageShape } from 'tldraw'
+import type { TLBinding, TLImageShape, TLShape, TLTextShape } from 'tldraw'
 import { IMAGE_ASPECT_RATIOS } from '../../lib/imageGeneration'
 import type { ImageAspectRatio, ImageGenerationSize, ImageGeneratorModel } from '../../lib/imageGeneration'
 import {
@@ -17,6 +17,84 @@ import type { GeneratorShapeMeta, PageBounds, ScreenBounds, TaskStatus } from '.
 
 export const getInitialViewportWidth = () =>
   typeof window === 'undefined' ? 1280 : window.innerWidth
+
+export const WORKBENCH_TEXT_TOOL_FONT_SIZE = 16
+export const TLDRAW_SMALL_TEXT_FONT_SIZE = 18
+export const WORKBENCH_TEXT_TOOL_SCALE = WORKBENCH_TEXT_TOOL_FONT_SIZE / TLDRAW_SMALL_TEXT_FONT_SIZE
+
+const DEFAULT_TEXT_TOOL_WIDTH = 20
+
+const isEmptyRichTextDocument = (richText: TLTextShape['props']['richText']) => {
+  if (richText.type !== 'doc' || richText.content.length !== 1) {
+    return false
+  }
+
+  const [firstBlock] = richText.content
+  if (!firstBlock || typeof firstBlock !== 'object') {
+    return false
+  }
+
+  const paragraphBlock = firstBlock as { type?: unknown; content?: unknown }
+  if (paragraphBlock.type !== 'paragraph') {
+    return false
+  }
+
+  if (paragraphBlock.content == null) {
+    return true
+  }
+
+  return Array.isArray(paragraphBlock.content) && paragraphBlock.content.length === 0
+}
+
+const isDefaultNewTextShape = (shape: TLShape): shape is TLTextShape => {
+  if (shape.type !== 'text') {
+    return false
+  }
+
+  return (
+    shape.props.size === 'm' &&
+    shape.props.scale === 1 &&
+    shape.props.autoSize === true &&
+    shape.props.w === DEFAULT_TEXT_TOOL_WIDTH &&
+    isEmptyRichTextDocument(shape.props.richText)
+  )
+}
+
+export const normalizeCreatedTextShapeForWorkbench = (
+  shape: TLShape,
+  source: 'remote' | 'user',
+  currentToolId: string
+): TLShape => {
+  if (source !== 'user' || currentToolId !== 'text' || !isDefaultNewTextShape(shape)) {
+    return shape
+  }
+
+  return {
+    ...shape,
+    props: {
+      ...shape.props,
+      size: 's',
+      scale: WORKBENCH_TEXT_TOOL_SCALE,
+    },
+  }
+}
+
+export const shouldBringCreatedArrowToFrontInWorkbench = (
+  shape: TLShape,
+  source: 'remote' | 'user',
+  currentToolId: string
+) => source === 'user' && currentToolId === 'arrow' && shape.type === 'arrow'
+
+export const shouldRemoveArrowImageBindingInWorkbench = (
+  binding: TLBinding,
+  source: 'remote' | 'user',
+  fromShape: TLShape | null | undefined,
+  toShape: TLShape | null | undefined
+) =>
+  source === 'user' &&
+  binding.type === 'arrow' &&
+  fromShape?.type === 'arrow' &&
+  toShape?.type === 'image'
 
 export const getMaxSidebarWidth = (viewportWidth: number) => {
   return Math.max(

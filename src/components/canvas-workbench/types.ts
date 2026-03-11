@@ -8,7 +8,7 @@ import type { MaskBounds } from '../../lib/maskedImageEdit'
 export type TaskStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 export type GenerationTaskMaskMode = 'semantic-crop'
 
-export type ToolId = 'select' | 'frame' | 'rectangle' | 'text' | 'draw' | 'asset'
+export type ToolId = 'select' | 'frame' | 'rectangle' | 'arrow' | 'text' | 'draw' | 'asset'
 export type ToolIconId = ToolId | 'generator'
 
 export type ScreenBounds = {

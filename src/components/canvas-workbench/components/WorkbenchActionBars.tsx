@@ -1,4 +1,5 @@
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from 'react'
+import { Rotate3d } from 'lucide-react'
 import { ACTION_PRESETS, IMAGE_EDIT_PRESETS } from '../constants'
 import type { ImageEditActionPreset } from '../types'
 
@@ -46,10 +47,10 @@ export function WorkbenchActionBars({
           })}
           <button
             type="button"
-            className="camera-angle-action-trigger"
             onClick={onOpenCameraAngle}
             onMouseDown={onToolbarMouseDown}
           >
+            <Rotate3d size={14} />
             多角度
           </button>
         </div>

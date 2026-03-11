@@ -97,6 +97,7 @@ export const TOOL_ITEMS: ToolItem[] = [
   { id: 'select', label: '选择', icon: 'select' },
   { id: 'frame', label: '画框', icon: 'frame' },
   { id: 'rectangle', label: '矩形', icon: 'rectangle' },
+  { id: 'arrow', label: '箭头', icon: 'arrow' },
   { id: 'text', label: '文本', icon: 'text' },
   { id: 'draw', label: '画笔', icon: 'draw' },
   { id: 'asset', label: '媒体', icon: 'asset' },
