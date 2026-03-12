@@ -1,4 +1,5 @@
-import { buildGeminiRequestHeaders, getServerGeminiApiKey, getServerGeminiBaseUrl } from './geminiConfig'
+import { readGeminiConnectionOverrideFromHeaders } from '../src/lib/geminiConnection'
+import { buildGeminiRequestHeaders, resolveServerGeminiConnection } from './geminiConfig'
 import { readRequestBody, sendJson, type NextHandleFunction } from './httpUtils'
 
 const PROXY_PREFIXES = ['/api/gemini', '/api/uniapi']
@@ -24,7 +25,11 @@ export const createGeminiProxyHandler = (): NextHandleFunction => {
       return
     }
 
-    const apiKey = getServerGeminiApiKey()
+    const connectionOverride = readGeminiConnectionOverrideFromHeaders(
+      req.headers as Record<string, unknown>
+    )
+    const { apiKey, baseUrl } = resolveServerGeminiConnection(connectionOverride)
+
     if (!apiKey) {
       sendJson(res, 500, {
         error:
@@ -32,8 +37,6 @@ export const createGeminiProxyHandler = (): NextHandleFunction => {
       })
       return
     }
-
-    const baseUrl = getServerGeminiBaseUrl()
     const upstreamPath = requestUrl.pathname.slice(matchedPrefix.length)
     const endpoint = `${baseUrl}${upstreamPath || ''}${requestUrl.search}`
 

@@ -47,6 +47,7 @@ export const parseBooleanLike = (value: unknown): boolean | undefined => {
 const SENSITIVE_HEADER_KEYS = new Set([
   'authorization',
   'x-goog-api-key',
+  'x-canvas-gemini-api-key',
   'api-key',
   'x-api-key',
   'x-rapidapi-key',
@@ -136,6 +137,18 @@ export const redactImageApiPayload = (payload: unknown): unknown => {
 
   const output: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(payload)) {
+    const normalizedKey = key.toLowerCase()
+
+    if (
+      (normalizedKey === 'apikey' ||
+        normalizedKey === 'api_key' ||
+        normalizedKey === 'x-canvas-gemini-api-key') &&
+      typeof value === 'string'
+    ) {
+      output[key] = '<redacted>'
+      continue
+    }
+
     if ((key === 'b64_json' || key === 'b64Json') && typeof value === 'string') {
       output[key] = toOmittedBase64Placeholder(value)
       continue

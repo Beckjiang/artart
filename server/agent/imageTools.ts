@@ -7,12 +7,12 @@ import {
 } from '../../src/lib/imageApiCallLog'
 import { appendImageApiCallLogBestEffort } from '../imageApiCallLogWriter'
 import type { CanvasInsertHint } from '../../src/lib/agentChatTypes'
+import type { GeminiConnectionOverride } from '../../src/lib/geminiConnection'
 import {
   buildGeminiRequestHeaders,
-  getServerGeminiApiKey,
-  getServerGeminiBaseUrl,
+  resolveServerGeminiConnection,
 } from '../geminiConfig'
-import { getEnvValue, hasGeminiImageConfig } from './env'
+import { getEnvValue } from './env'
 
 type GeminiImageResult = {
   dataUrl: string
@@ -24,6 +24,7 @@ type RunImageToolParams = {
   prompt: string
   insertHint?: CanvasInsertHint | null
   referenceDataUrls?: string[]
+  geminiConnectionOverride?: GeminiConnectionOverride | null
 }
 
 type GeminiInlineData = {
@@ -170,14 +171,14 @@ const requestGeminiImage = async (
   prompt: string,
   insertHint?: CanvasInsertHint | null,
   referenceDataUrls: string[] = [],
-  runId?: string
+  runId?: string,
+  geminiConnectionOverride?: GeminiConnectionOverride | null
 ): Promise<GeminiImageResult> => {
-  const apiKey = getServerGeminiApiKey()
+  const { apiKey, baseUrl } = resolveServerGeminiConnection(geminiConnectionOverride)
   if (!apiKey) {
     throw new Error('missing_gemini_api_key')
   }
 
-  const baseUrl = getServerGeminiBaseUrl()
   const imageModel = getEnvValue('VITE_GEMINI_IMAGE_MODEL') || IMAGE_MODEL_FALLBACK
   const imageSize = getEnvValue('VITE_GEMINI_IMAGE_SIZE') || IMAGE_SIZE_FALLBACK
   const aspectRatio = getAspectRatioValue(insertHint)
@@ -393,11 +394,19 @@ export const runTextToImageTool = async ({
   runId,
   prompt,
   insertHint,
+  geminiConnectionOverride,
 }: RunImageToolParams): Promise<GeminiImageResult & { width: number; height: number }> => {
   const dimensions = resolveDimensions(insertHint)
+  const { apiKey } = resolveServerGeminiConnection(geminiConnectionOverride)
 
-  if (hasGeminiImageConfig()) {
-    const result = await requestGeminiImage(prompt, insertHint, [], runId)
+  if (apiKey) {
+    const result = await requestGeminiImage(
+      prompt,
+      insertHint,
+      [],
+      runId,
+      geminiConnectionOverride
+    )
     return {
       ...result,
       ...dimensions,
@@ -431,17 +440,24 @@ export const runImageToImageTool = async ({
   prompt,
   insertHint,
   referenceDataUrls = [],
+  geminiConnectionOverride,
 }: RunImageToolParams): Promise<GeminiImageResult & { width: number; height: number }> => {
   if (referenceDataUrls.length === 0) {
     throw new Error('missing_reference_image')
   }
 
-  if (!hasGeminiImageConfig()) {
+  if (!resolveServerGeminiConnection(geminiConnectionOverride).apiKey) {
     throw new Error('image_to_image_requires_gemini')
   }
 
   const dimensions = resolveDimensions(insertHint)
-  const result = await requestGeminiImage(prompt, insertHint, referenceDataUrls, runId)
+  const result = await requestGeminiImage(
+    prompt,
+    insertHint,
+    referenceDataUrls,
+    runId,
+    geminiConnectionOverride
+  )
   return {
     ...result,
     ...dimensions,

@@ -4,6 +4,7 @@ import type {
   SendAgentMessageRequest,
   SessionMessagesResponse,
 } from '../../src/lib/agentChatTypes'
+import { readGeminiConnectionOverrideFromHeaders } from '../../src/lib/geminiConnection'
 import {
   attachAssetsToMessage,
   createAsset,
@@ -75,6 +76,9 @@ const handleListMessages = async (boardId: string, res: ServerResponse) => {
 
 const handleSendMessage = async (boardId: string, req: IncomingMessage, res: ServerResponse) => {
   const payload = (await readJsonBody(req)) as SendAgentMessageRequest
+  const geminiConnectionOverride = readGeminiConnectionOverrideFromHeaders(
+    req.headers as Record<string, unknown>
+  )
   const hasText = Boolean(payload.text?.trim())
   const hasAttachment = Boolean(payload.attachments?.length)
   const hasSelection = Boolean(payload.selectionContext)
@@ -149,6 +153,7 @@ const handleSendMessage = async (boardId: string, req: IncomingMessage, res: Ser
     session,
     userMessage: acceptedMessage,
     selectionContext: payload.selectionContext ?? null,
+    geminiConnectionOverride,
   })
 }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { GeminiSettingsPanel } from '../components/GeminiSettingsPanel'
 import {
   createBoard,
   deleteBoard,
@@ -66,6 +67,8 @@ export function HomePage() {
           />
           <button type="submit">新建画布</button>
         </form>
+
+        <GeminiSettingsPanel />
       </section>
 
       <section className="board-list">

@@ -6,6 +6,7 @@ import type {
   ChatSelectionContext,
   ChatSession,
 } from '../../src/lib/agentChatTypes'
+import type { GeminiConnectionOverride } from '../../src/lib/geminiConnection'
 import {
   createGeneratedAttachment,
   createMessage,
@@ -26,6 +27,7 @@ type ProcessRunInput = {
   session: ChatSession
   userMessage: ChatMessage
   selectionContext?: ChatSelectionContext | null
+  geminiConnectionOverride?: GeminiConnectionOverride | null
 }
 
 const publish = (boardId: string, event: AgentStreamEvent) => {
@@ -120,6 +122,7 @@ export const processAgentRun = async ({
   session,
   userMessage,
   selectionContext,
+  geminiConnectionOverride,
 }: ProcessRunInput) => {
   const assistantMessage = await createMessage({
     id: createId('msg-assistant'),
@@ -214,11 +217,13 @@ export const processAgentRun = async ({
             prompt: action.toolPrompt,
             insertHint: selectionContext?.insertHint,
             referenceDataUrls: await resolveReferenceDataUrls(userMessage.attachments),
+            geminiConnectionOverride,
           })
         : await runTextToImageTool({
             runId,
             prompt: action.toolPrompt,
             insertHint: selectionContext?.insertHint,
+            geminiConnectionOverride,
           })
 
     toolMessage = await updateMessage(toolMessage.id, {

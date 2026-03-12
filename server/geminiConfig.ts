@@ -1,4 +1,8 @@
 import { getRuntimeConfigValue } from './runtimeConfig'
+import {
+  normalizeGeminiConnectionOverride,
+  type GeminiConnectionOverride,
+} from '../src/lib/geminiConnection'
 
 export const GEMINI_API_VERSION_PATH = '/v1beta'
 export const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
@@ -41,7 +45,19 @@ export const ensureGeminiApiBaseUrl = (value: string) => {
 
 export const isGeminiProxyBaseUrl = (baseUrl: string) => {
   const normalized = normalizeBaseUrl(baseUrl)
-  return normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL
+  if (normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL) {
+    return true
+  }
+
+  if (!isAbsoluteHttpUrl(normalized)) return false
+
+  try {
+    const parsed = new URL(normalized)
+    const pathname = parsed.pathname.replace(/\/+$/, '')
+    return pathname === DEV_PROXY_BASE_URL || pathname === LEGACY_DEV_PROXY_BASE_URL
+  } catch {
+    return false
+  }
 }
 
 export const normalizeGeminiServerBaseUrl = (baseUrl?: string) => {
@@ -85,12 +101,26 @@ export const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string) => {
   }
 }
 
-export const getServerGeminiApiKey = () =>
-  getRuntimeConfigValue('VITE_GEMINI_API_KEY') ||
-  getRuntimeConfigValue('GEMINI_API_KEY') ||
-  getRuntimeConfigValue('VITE_UNIAPI_API_KEY')
+export const resolveServerGeminiConnection = (override?: GeminiConnectionOverride | null) => {
+  const normalizedOverride = normalizeGeminiConnectionOverride(override)
 
-export const getServerGeminiBaseUrl = () =>
-  normalizeGeminiServerBaseUrl(
-    getRuntimeConfigValue('VITE_GEMINI_BASE_URL') || getRuntimeConfigValue('VITE_UNIAPI_BASE_URL')
-  )
+  return {
+    apiKey:
+      normalizedOverride?.apiKey ||
+      getRuntimeConfigValue('VITE_GEMINI_API_KEY') ||
+      getRuntimeConfigValue('GEMINI_API_KEY') ||
+      getRuntimeConfigValue('VITE_UNIAPI_API_KEY') ||
+      '',
+    baseUrl: normalizeGeminiServerBaseUrl(
+      normalizedOverride?.baseUrl ||
+        getRuntimeConfigValue('VITE_GEMINI_BASE_URL') ||
+        getRuntimeConfigValue('VITE_UNIAPI_BASE_URL')
+    ),
+  }
+}
+
+export const getServerGeminiApiKey = (override?: GeminiConnectionOverride | null) =>
+  resolveServerGeminiConnection(override).apiKey
+
+export const getServerGeminiBaseUrl = (override?: GeminiConnectionOverride | null) =>
+  resolveServerGeminiConnection(override).baseUrl

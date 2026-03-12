@@ -7,11 +7,13 @@ describe('redactHeaders', () => {
     const result = redactHeaders({
       Authorization: 'Bearer secret-token',
       'x-goog-api-key': 'gemini-key',
+      'x-canvas-gemini-api-key': 'local-key',
       'Content-Type': 'application/json',
     })
 
     expect(result.Authorization).toBe('<redacted>')
     expect(result['x-goog-api-key']).toBe('<redacted>')
+    expect(result['x-canvas-gemini-api-key']).toBe('<redacted>')
     expect(result['Content-Type']).toBe('application/json')
   })
 
@@ -19,12 +21,14 @@ describe('redactHeaders', () => {
     const headers = new Headers({
       Authorization: 'Bearer secret-token',
       'x-goog-api-key': 'gemini-key',
+      'x-canvas-gemini-api-key': 'local-key',
       'Content-Type': 'application/json',
     })
 
     const result = redactHeaders(headers)
     expect(result.authorization).toBe('<redacted>')
     expect(result['x-goog-api-key']).toBe('<redacted>')
+    expect(result['x-canvas-gemini-api-key']).toBe('<redacted>')
     expect(result['content-type']).toBe('application/json')
   })
 })
@@ -43,8 +47,10 @@ describe('redactImageApiPayload', () => {
       b64_json: 'Zm9v',
       b64Json: 'YmFy',
       dataUrl: 'data:image/png;base64,Zm9v',
+      apiKey: 'plain-api-key',
       nested: {
         url: 'data:image/png;base64,YmFy',
+        api_key: 'nested-api-key',
       },
     }
 
@@ -58,7 +64,9 @@ describe('redactImageApiPayload', () => {
     expect(redacted.b64_json).toBe('<omitted base64 length=4>')
     expect(redacted.b64Json).toBe('<omitted base64 length=4>')
     expect(redacted.dataUrl).toBe('<omitted base64 length=4>')
+    expect(redacted.apiKey).toBe('<redacted>')
     expect(nested.url).toBe('<omitted base64 length=4>')
+    expect(nested.api_key).toBe('<redacted>')
 
     const serialized = JSON.stringify(redacted)
     expect(serialized).not.toContain('Zm9v')

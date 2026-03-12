@@ -5,6 +5,8 @@ import type {
   SendAgentMessageResponse,
   SessionMessagesResponse,
 } from './agentChatTypes'
+import { buildGeminiConnectionOverrideHeaders } from './geminiConnection'
+import { readLocalGeminiConnectionOverride } from './geminiConnectionSettings'
 import { buildApiUrl } from './runtime'
 
 const ensureOk = async (response: Response) => {
@@ -63,6 +65,7 @@ export const sendAgentMessage = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...buildGeminiConnectionOverrideHeaders(readLocalGeminiConnectionOverride()),
       },
       body: JSON.stringify(request),
     }

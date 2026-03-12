@@ -79,6 +79,34 @@ describe('imageTools gemini headers', () => {
     expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
   })
 
+  it('prefers request-scoped overrides over env defaults', async () => {
+    process.env.VITE_GEMINI_API_KEY = 'env-key'
+    process.env.VITE_GEMINI_BASE_URL = 'http://zx2.52youxi.cc:3000'
+    process.env.VITE_GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview'
+    process.env.VITE_GEMINI_IMAGE_SIZE = '1K'
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(mockOkResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await runTextToImageTool({
+      prompt: 'draw a cat',
+      geminiConnectionOverride: {
+        baseUrl: 'https://generativelanguage.googleapis.com',
+        apiKey: 'local-key',
+      },
+    })
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent'
+    )
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(init.headers).toMatchObject({
+      'x-goog-api-key': 'local-key',
+      'Content-Type': 'application/json',
+    })
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
+  })
+
   it('treats /api/gemini as an official proxy', async () => {
     process.env.VITE_GEMINI_API_KEY = 'test-key'
     process.env.VITE_GEMINI_BASE_URL = '/api/gemini'

@@ -155,7 +155,20 @@ npm run start:pwa
 
 ## 生图接口配置（Gemini API）
 
-在项目根目录创建 `.env.local`：
+首页画布列表页现在提供了一个内联的“Gemini 设置”面板，可直接配置：
+
+- `Base URL`
+- `API Key`
+
+行为说明：
+
+- 设置面板中的本地配置优先于 `.env` / `.env.local` 的同名前端配置。
+- `API Key` 只保存在当前客户端本地存储，不会写入服务端 `config.json`、`.env` 或数据库。
+- 当 `Base URL` 填写为 `/api/gemini` 时，页面内生图和 Agent 都会通过本地代理发起请求，并把当前客户端的连接配置通过私有请求头临时透传给服务端。
+- 当 `Base URL` 填写为外部 `http/https` 地址时，页面内直接生图会由浏览器直连该地址；Agent 仍通过本地 API 发起请求，但会沿用同一份客户端连接配置。
+- 如果清除本地配置，则会回退到现有的环境变量/默认值逻辑。
+
+如果你更习惯用环境变量，也仍然可以在项目根目录创建 `.env.local`：
 
 ```bash
 VITE_GEMINI_API_KEY=your_key
@@ -180,6 +193,7 @@ VITE_GEMINI_IMAGE_SIZE=2K
   - `POST /v1beta/models/{model}:generateContent`
   - 通过 `contents[].parts` 传入文本提示词与参考图
   - 通过 `generationConfig.responseModalities = ["TEXT", "IMAGE"]` 请求图片输出
+- 当请求命中本地代理 `/api/gemini` 时，客户端会附带私有请求头 `X-Canvas-Gemini-Base-Url` / `X-Canvas-Gemini-Api-Key`，仅对当前请求生效，不会写盘。
 - 图生图会先把参考图转成 PNG，再以内联图片数据发送给 Gemini，减少跨域和图片格式兼容问题。
 - 开发环境默认通过 Vite 代理 `/api/gemini -> https://generativelanguage.googleapis.com/v1beta`，减少浏览器 CORS 问题。
 - 为了平滑迁移，旧的 `VITE_UNIAPI_*` 环境变量名和 `/api/uniapi` 本地代理路径仍会自动映射到 Gemini。

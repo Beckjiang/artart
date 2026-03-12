@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  GEMINI_API_KEY_OVERRIDE_HEADER,
+  GEMINI_BASE_URL_OVERRIDE_HEADER,
+} from './geminiConnection'
+import { saveGeminiConnectionSettings } from './geminiConnectionSettings'
+import {
   buildGeminiGenerateContentEndpoint,
   buildGeminiGenerateContentRequest,
   buildNetworkErrorMessage,
@@ -9,6 +14,34 @@ import {
   readGeminiResponse,
   resolveGeminiConfig,
 } from './imageGeneration'
+
+class MemoryStorage implements Storage {
+  private data = new Map<string, string>()
+
+  get length() {
+    return this.data.size
+  }
+
+  clear() {
+    this.data.clear()
+  }
+
+  getItem(key: string) {
+    return this.data.get(key) ?? null
+  }
+
+  key(index: number) {
+    return Array.from(this.data.keys())[index] ?? null
+  }
+
+  removeItem(key: string) {
+    this.data.delete(key)
+  }
+
+  setItem(key: string, value: string) {
+    this.data.set(key, value)
+  }
+}
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -54,6 +87,18 @@ describe('resolveGeminiConfig', () => {
 
     expect(config.imageModel).toBe('gemini-3.1-flash-image-preview')
     expect(config.imageSize).toBe('2K')
+  })
+
+  it('allows proxy requests without a browser-side api key', () => {
+    const config = resolveGeminiConfig(
+      {
+        VITE_GEMINI_BASE_URL: '/api/gemini',
+      },
+      true
+    )
+
+    expect(config.baseUrl).toBe('/api/gemini')
+    expect(config.apiKey).toBe('')
   })
 })
 
@@ -377,6 +422,108 @@ describe('generateImageFromPrompt', () => {
     })
     expect(firstBody.generationConfig).toBeTruthy()
     expect(firstBody.generation_config).toBeFalsy()
+  })
+
+  it('prefers the locally saved direct connection override over env defaults', async () => {
+    vi.stubGlobal('localStorage', new MemoryStorage())
+    saveGeminiConnectionSettings({
+      baseUrl: 'https://generativelanguage.googleapis.com',
+      apiKey: 'local-key',
+    })
+    vi.stubEnv('VITE_GEMINI_API_KEY', 'env-key')
+    vi.stubEnv('VITE_GEMINI_BASE_URL', '/api/gemini')
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+    })
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent'
+    )
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'x-goog-api-key': 'local-key',
+      'Content-Type': 'application/json',
+    })
+  })
+
+  it('sends request-scoped override headers when the locally saved base url uses the proxy', async () => {
+    vi.stubGlobal('localStorage', new MemoryStorage())
+    saveGeminiConnectionSettings({
+      baseUrl: '/api/gemini',
+      apiKey: 'local-key',
+    })
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    inline_data: {
+                      mime_type: 'image/png',
+                      data: 'Zm9v',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+    )
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await generateImageFromPrompt({
+      prompt: '生成一只猫',
+      width: 1024,
+      height: 1024,
+    })
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(headers[GEMINI_BASE_URL_OVERRIDE_HEADER]).toBe('/api/gemini')
+    expect(headers[GEMINI_API_KEY_OVERRIDE_HEADER]).toBe('local-key')
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers['x-goog-api-key']).toBeUndefined()
   })
 
   it('surfaces a clear message when the gateway does not support image editing', async () => {

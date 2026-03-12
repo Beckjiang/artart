@@ -5,6 +5,12 @@ import {
   redactHeaders,
   redactImageApiPayload,
 } from './imageApiCallLog'
+import {
+  buildGeminiConnectionOverrideHeaders,
+  normalizeGeminiConnectionOverride,
+  type GeminiConnectionOverride,
+} from './geminiConnection'
+import { readLocalGeminiConnectionOverride } from './geminiConnectionSettings'
 import { buildApiUrl, isDesktopRuntime } from './runtime'
 
 const resolveImageApiLogEnabled = (): boolean => {
@@ -129,6 +135,7 @@ export type GeminiConfig = {
   apiKey: string
   imageModel: ImageGeneratorModel
   imageSize: ImageGenerationSize
+  connectionOverride?: GeminiConnectionOverride | null
 }
 
 export type GeminiRequestStyle = 'camel' | 'snake'
@@ -214,6 +221,51 @@ const normalizeLegacyBaseUrl = (baseUrl?: string): string | null => {
   return normalized
 }
 
+export const isGeminiProxyBaseUrl = (baseUrl: string) => {
+  const normalized = normalizeBaseUrl(baseUrl)
+  if (normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL) {
+    return true
+  }
+
+  if (!isAbsoluteHttpUrl(normalized)) return false
+
+  try {
+    const parsed = new URL(normalized)
+    const pathname = parsed.pathname.replace(/\/+$/, '')
+    return pathname === DEV_PROXY_BASE_URL || pathname === LEGACY_DEV_PROXY_BASE_URL
+  } catch {
+    return false
+  }
+}
+
+const resolveConfiguredBaseUrl = (value?: string) => {
+  const normalized = normalizeLegacyBaseUrl(value)
+  return normalized ? ensureGeminiApiBaseUrl(normalized) : undefined
+}
+
+export const resolveGeminiBaseUrl = (
+  env: GeminiEnv,
+  isDev: boolean,
+  connectionOverride?: GeminiConnectionOverride | null
+) => {
+  const normalizedOverride = normalizeGeminiConnectionOverride(connectionOverride)
+
+  if (isDesktopRuntime()) {
+    const desktopBaseUrl =
+      resolveConfiguredBaseUrl(normalizedOverride?.baseUrl) || buildApiUrl(DEV_PROXY_BASE_URL)
+
+    return isGeminiProxyBaseUrl(desktopBaseUrl) ? buildApiUrl(desktopBaseUrl) : desktopBaseUrl
+  }
+
+  const defaultBaseUrl = isDev ? DEV_PROXY_BASE_URL : DIRECT_GEMINI_DEFAULT_BASE_URL
+  return (
+    resolveConfiguredBaseUrl(normalizedOverride?.baseUrl) ||
+    resolveConfiguredBaseUrl(readStringEnv(env.VITE_GEMINI_BASE_URL)) ||
+    resolveConfiguredBaseUrl(readStringEnv(env.VITE_UNIAPI_BASE_URL)) ||
+    ensureGeminiApiBaseUrl(defaultBaseUrl)
+  )
+}
+
 export const resolveGeminiImageDefaults = (env: GeminiEnv) => ({
   imageModel: normalizeImageGeneratorModel(
     readStringEnv(env.VITE_GEMINI_IMAGE_MODEL) || readStringEnv(env.VITE_UNIAPI_IMAGE_MODEL)
@@ -223,38 +275,56 @@ export const resolveGeminiImageDefaults = (env: GeminiEnv) => ({
   ),
 })
 
-export const resolveGeminiConfig = (env: GeminiEnv, isDev: boolean): GeminiConfig => {
+export const resolveGeminiConfig = (
+  env: GeminiEnv,
+  isDev: boolean,
+  connectionOverride?: GeminiConnectionOverride | null
+): GeminiConfig => {
   const { imageModel, imageSize } = resolveGeminiImageDefaults(env)
+  const normalizedOverride = normalizeGeminiConnectionOverride(connectionOverride)
+  const baseUrl = resolveGeminiBaseUrl(env, isDev, normalizedOverride)
 
   if (isDesktopRuntime()) {
+    const desktopApiKey =
+      normalizedOverride?.apiKey ||
+      readStringEnv(env.VITE_GEMINI_API_KEY) ||
+      readStringEnv(env.VITE_UNIAPI_API_KEY) ||
+      ''
+
+    if (!desktopApiKey && !isGeminiProxyBaseUrl(baseUrl)) {
+      throw new Error('未配置 `VITE_GEMINI_API_KEY`，无法调用 Gemini 生图接口')
+    }
+
     return {
-      apiKey: '',
-      baseUrl: buildApiUrl(DEV_PROXY_BASE_URL),
+      apiKey: desktopApiKey,
+      baseUrl,
       imageModel,
       imageSize,
+      connectionOverride: normalizedOverride,
     }
   }
 
-  const apiKey = readStringEnv(env.VITE_GEMINI_API_KEY) || readStringEnv(env.VITE_UNIAPI_API_KEY)
-  if (!apiKey) {
+  const apiKey =
+    normalizedOverride?.apiKey ||
+    readStringEnv(env.VITE_GEMINI_API_KEY) ||
+    readStringEnv(env.VITE_UNIAPI_API_KEY) ||
+    ''
+
+  if (!apiKey && !isGeminiProxyBaseUrl(baseUrl)) {
     throw new Error('未配置 `VITE_GEMINI_API_KEY`，无法调用 Gemini 生图接口')
   }
 
-  const defaultBaseUrl = isDev ? DEV_PROXY_BASE_URL : DIRECT_GEMINI_DEFAULT_BASE_URL
-  const configuredBaseUrl =
-    readStringEnv(env.VITE_GEMINI_BASE_URL) ||
-    normalizeLegacyBaseUrl(readStringEnv(env.VITE_UNIAPI_BASE_URL)) ||
-    defaultBaseUrl
-
   return {
     apiKey,
-    baseUrl: ensureGeminiApiBaseUrl(configuredBaseUrl),
+    baseUrl,
     imageModel,
     imageSize,
+    connectionOverride: normalizedOverride,
   }
 }
 
-const getConfig = (): GeminiConfig => resolveGeminiConfig(import.meta.env, import.meta.env.DEV)
+const getConfig = (): GeminiConfig =>
+  resolveGeminiConfig(import.meta.env, import.meta.env.DEV, readLocalGeminiConnectionOverride())
 
 const getInlineData = (part: GeminiPart): GeminiInlineData | null =>
   part.inlineData || part.inline_data || null
@@ -635,13 +705,8 @@ export const readGeminiResponse = async (response: Response): Promise<GeminiResp
 export const buildGeminiGenerateContentEndpoint = (baseUrl: string, imageModel: string) =>
   `${ensureGeminiApiBaseUrl(baseUrl)}/models/${imageModel}:generateContent`
 
-const isProxyBaseUrl = (baseUrl: string) => {
-  const normalized = normalizeBaseUrl(baseUrl)
-  return normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL
-}
-
 const isOfficialGeminiBaseUrl = (baseUrl: string) => {
-  if (isProxyBaseUrl(baseUrl)) return true
+  if (isGeminiProxyBaseUrl(baseUrl)) return true
 
   try {
     const parsed = new URL(ensureGeminiApiBaseUrl(baseUrl))
@@ -672,6 +737,17 @@ const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string): Record<stri
     'Content-Type': 'application/json',
     Authorization: `Bearer ${apiKey}`,
   }
+}
+
+const buildGeminiFetchHeaders = (config: GeminiConfig): Record<string, string> => {
+  if (isGeminiProxyBaseUrl(config.baseUrl)) {
+    return {
+      'Content-Type': 'application/json',
+      ...buildGeminiConnectionOverrideHeaders(config.connectionOverride),
+    }
+  }
+
+  return buildGeminiRequestHeaders(config.baseUrl, config.apiKey)
 }
 
 const normalizeGeminiError = (
@@ -726,7 +802,7 @@ const requestGeminiImage = async (
     return typeof text === 'string' && text.trim() ? text : params.prompt
   })()
 
-  const requestHeaders = buildGeminiRequestHeaders(config.baseUrl, config.apiKey)
+  const requestHeaders = buildGeminiFetchHeaders(config)
   const redactedRequestHeaders = redactHeaders(requestHeaders)
   const redactedRequestBody = redactImageApiPayload(requestBody)
 
