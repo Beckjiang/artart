@@ -1,14 +1,14 @@
 import { existsSync } from 'node:fs'
 import { mkdir, rm } from 'node:fs/promises'
-import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawnChildProcess } from './spawn-utils.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const projectRoot = path.resolve(__dirname, '../..')
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+const npmCommand = 'npm'
+const npxCommand = 'npx'
 
 const DMG_RELEASE = 'dmg-builder@1.2.0'
 const DMG_BUNDLE_VERSION = '75c8a6c'
@@ -21,7 +21,7 @@ const DMG_VENDOR_PATH = path.join(DMG_CACHE_ROOT, 'dmgbuild')
 
 const run = (command, args, extraEnv = {}) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnChildProcess(command, args, {
       cwd: projectRoot,
       stdio: 'inherit',
       env: {
