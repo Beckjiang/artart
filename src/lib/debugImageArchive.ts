@@ -1,3 +1,5 @@
+import { buildApiUrl } from './runtime'
+
 type DebugImageItem = {
   label: string
   url?: string
@@ -17,7 +19,7 @@ type ArchiveDebugImagesResponse = {
   failed: number
 }
 
-const ENDPOINT = '/api/local-debug/save-image-set'
+const ENDPOINT = buildApiUrl('/api/local-debug/save-image-set')
 
 export const archiveDebugImages = async (
   params: ArchiveDebugImagesParams
@@ -41,4 +43,3 @@ export const archiveDebugImages = async (
 
   return (await response.json()) as ArchiveDebugImagesResponse
 }
-

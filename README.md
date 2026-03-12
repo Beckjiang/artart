@@ -37,6 +37,62 @@ npm run dev
 
 - [http://localhost:5173](http://localhost:5173)
 
+## 桌面端（Electron）
+
+已支持把当前项目打包为 macOS 桌面应用，保留现有 React/tldraw UI，并在桌面版内置本地 HTTP 服务承载：
+
+- `/api/agent/*` 本地 Agent 接口
+- `/api/local-debug/*` 调试写盘接口
+- `/api/gemini/*` 本地 Gemini 代理
+
+### 桌面开发
+
+```bash
+npm install
+npm run dev:desktop
+```
+
+桌面开发态会：
+
+- 启动 Vite 开发服务器（固定 `http://127.0.0.1:5173`）
+- 构建 Electron `main/preload`
+- 用 Electron 加载当前前端页面
+
+### 桌面打包
+
+```bash
+npm run build:desktop
+```
+
+默认会生成：
+
+- `dist-desktop/Canvas-0.0.0-arm64-mac.zip`
+- `dist-desktop/Canvas-0.0.0-arm64.dmg`
+
+### 桌面版配置
+
+桌面版优先从环境变量读取配置；如果没有，也会读取用户数据目录下的 `config.json`。
+
+macOS 常见路径：
+
+- `~/Library/Application Support/Canvas/config.json`
+
+示例：
+
+```json
+{
+  "GEMINI_API_KEY": "your_key",
+  "VITE_GEMINI_BASE_URL": "https://generativelanguage.googleapis.com",
+  "OPENAI_API_KEY": "your_openai_key"
+}
+```
+
+说明：
+
+- 桌面版渲染进程不再要求直接持有 Gemini key，而是统一走本地 `/api/gemini` 代理。
+- Agent 数据库与 payload 会写入桌面应用的 `userData/.data/`。
+- 调试图片与 API 调用归档会写入桌面应用的 `userData/debug-image-io/`。
+
 ## 校验
 
 ```bash

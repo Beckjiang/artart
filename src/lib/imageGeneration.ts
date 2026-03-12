@@ -5,6 +5,7 @@ import {
   redactHeaders,
   redactImageApiPayload,
 } from './imageApiCallLog'
+import { buildApiUrl, isDesktopRuntime } from './runtime'
 
 const resolveImageApiLogEnabled = (): boolean => {
   const env = import.meta.env as Record<string, unknown>
@@ -223,6 +224,17 @@ export const resolveGeminiImageDefaults = (env: GeminiEnv) => ({
 })
 
 export const resolveGeminiConfig = (env: GeminiEnv, isDev: boolean): GeminiConfig => {
+  const { imageModel, imageSize } = resolveGeminiImageDefaults(env)
+
+  if (isDesktopRuntime()) {
+    return {
+      apiKey: '',
+      baseUrl: buildApiUrl(DEV_PROXY_BASE_URL),
+      imageModel,
+      imageSize,
+    }
+  }
+
   const apiKey = readStringEnv(env.VITE_GEMINI_API_KEY) || readStringEnv(env.VITE_UNIAPI_API_KEY)
   if (!apiKey) {
     throw new Error('未配置 `VITE_GEMINI_API_KEY`，无法调用 Gemini 生图接口')
@@ -233,8 +245,6 @@ export const resolveGeminiConfig = (env: GeminiEnv, isDev: boolean): GeminiConfi
     readStringEnv(env.VITE_GEMINI_BASE_URL) ||
     normalizeLegacyBaseUrl(readStringEnv(env.VITE_UNIAPI_BASE_URL)) ||
     defaultBaseUrl
-
-  const { imageModel, imageSize } = resolveGeminiImageDefaults(env)
 
   return {
     apiKey,
@@ -332,11 +342,25 @@ const resolveRequestUrl = (input: RequestInfo | URL): string => {
 
 export const buildNetworkErrorMessage = (requestUrl: string, error: unknown) => {
   const hints: string[] = []
-  const usesLocalProxy =
-    requestUrl.startsWith(`${DEV_PROXY_BASE_URL}/`) ||
-    requestUrl === DEV_PROXY_BASE_URL ||
-    requestUrl.startsWith(`${LEGACY_DEV_PROXY_BASE_URL}/`) ||
-    requestUrl === LEGACY_DEV_PROXY_BASE_URL
+  const usesLocalProxy = (() => {
+    try {
+      const pageOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+      const parsedUrl = new URL(requestUrl, pageOrigin)
+      return (
+        parsedUrl.pathname === DEV_PROXY_BASE_URL ||
+        parsedUrl.pathname.startsWith(`${DEV_PROXY_BASE_URL}/`) ||
+        parsedUrl.pathname === LEGACY_DEV_PROXY_BASE_URL ||
+        parsedUrl.pathname.startsWith(`${LEGACY_DEV_PROXY_BASE_URL}/`)
+      )
+    } catch {
+      return (
+        requestUrl.startsWith(`${DEV_PROXY_BASE_URL}/`) ||
+        requestUrl === DEV_PROXY_BASE_URL ||
+        requestUrl.startsWith(`${LEGACY_DEV_PROXY_BASE_URL}/`) ||
+        requestUrl === LEGACY_DEV_PROXY_BASE_URL
+      )
+    }
+  })()
 
   try {
     const pageOrigin = typeof window !== 'undefined' ? window.location.origin : undefined
@@ -631,6 +655,12 @@ export const getGeminiRequestStyleOrder = (baseUrl: string): GeminiRequestStyle[
   isOfficialGeminiBaseUrl(baseUrl) ? ['camel'] : ['camel']
 
 const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string): Record<string, string> => {
+  if (!apiKey) {
+    return {
+      'Content-Type': 'application/json',
+    }
+  }
+
   if (isOfficialGeminiBaseUrl(baseUrl)) {
     return {
       'Content-Type': 'application/json',

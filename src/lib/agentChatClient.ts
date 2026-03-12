@@ -5,6 +5,7 @@ import type {
   SendAgentMessageResponse,
   SessionMessagesResponse,
 } from './agentChatTypes'
+import { buildApiUrl } from './runtime'
 
 const ensureOk = async (response: Response) => {
   if (response.ok) return response
@@ -23,12 +24,15 @@ const ensureOk = async (response: Response) => {
 }
 
 export const buildSessionEventsUrl = (boardId: string) =>
-  `/api/agent/sessions/${encodeURIComponent(boardId)}/events`
+  buildApiUrl(`/api/agent/sessions/${encodeURIComponent(boardId)}/events`)
 
 export const fetchSessionMessages = async (boardId: string): Promise<SessionMessagesResponse> => {
-  const response = await fetch(`/api/agent/sessions/${encodeURIComponent(boardId)}/messages`, {
-    cache: 'no-store',
-  })
+  const response = await fetch(
+    buildApiUrl(`/api/agent/sessions/${encodeURIComponent(boardId)}/messages`),
+    {
+      cache: 'no-store',
+    }
+  )
 
   await ensureOk(response)
   return (await response.json()) as SessionMessagesResponse
@@ -37,7 +41,7 @@ export const fetchSessionMessages = async (boardId: string): Promise<SessionMess
 export const createAgentAsset = async (
   request: CreateAgentAssetRequest
 ): Promise<CreateAgentAssetResponse> => {
-  const response = await fetch('/api/agent/assets', {
+  const response = await fetch(buildApiUrl('/api/agent/assets'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -53,13 +57,16 @@ export const sendAgentMessage = async (
   boardId: string,
   request: SendAgentMessageRequest
 ): Promise<SendAgentMessageResponse> => {
-  const response = await fetch(`/api/agent/sessions/${encodeURIComponent(boardId)}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  })
+  const response = await fetch(
+    buildApiUrl(`/api/agent/sessions/${encodeURIComponent(boardId)}/messages`),
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    }
+  )
 
   await ensureOk(response)
   return (await response.json()) as SendAgentMessageResponse

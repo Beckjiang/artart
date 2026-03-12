@@ -13,6 +13,7 @@ import type {
   CreateAgentAssetRequest,
 } from '../../src/lib/agentChatTypes'
 import { maybeExternalizePayload, resolveExternalizedPayload } from './payloadStore'
+import { getServerDataRoot } from '../runtimeConfig'
 import { nowIso, safeJsonParse } from './utils'
 
 type DbHandle = Awaited<ReturnType<typeof createDatabase>>
@@ -73,18 +74,27 @@ type AssetRow = {
   created_at: string
 }
 
-const DATA_DIR = path.join(process.cwd(), '.data')
-const DB_PATH = path.join(DATA_DIR, 'agent-chat.sqlite')
-const PAYLOAD_DIR = path.join(DATA_DIR, 'agent-payloads')
 const ACTIVE_RUN_STALE_MS = 3 * 60 * 1000
 const STALE_RUN_ERROR = 'stale_run_recovered'
 const STALE_RUN_MESSAGE = '上一次生成已中断，请重新发送。'
 
 let dbPromise: Promise<DbHandle> | null = null
+let dbCacheKey: string | null = null
+
+const getDbPaths = () => {
+  const dataRoot = getServerDataRoot()
+  const dataDir = path.join(dataRoot, '.data')
+  return {
+    cacheKey: dataRoot,
+    dataDir,
+    dbPath: path.join(dataDir, 'agent-chat.sqlite'),
+    payloadDir: path.join(dataDir, 'agent-payloads'),
+  }
+}
 
 const storePayloadValue = (recordId: string, field: string, value?: string | null) =>
   maybeExternalizePayload({
-    payloadDir: PAYLOAD_DIR,
+    payloadDir: getDbPaths().payloadDir,
     recordId,
     field,
     value,
@@ -92,7 +102,7 @@ const storePayloadValue = (recordId: string, field: string, value?: string | nul
 
 const resolvePayloadValue = (value?: string | null) =>
   resolveExternalizedPayload({
-    payloadDir: PAYLOAD_DIR,
+    payloadDir: getDbPaths().payloadDir,
     value,
   })
 
@@ -125,9 +135,10 @@ export const isAgentRunStale = (
 }
 
 const createDatabase = async () => {
-  mkdirSync(DATA_DIR, { recursive: true })
+  const { dataDir, dbPath } = getDbPaths()
+  mkdirSync(dataDir, { recursive: true })
   const SQL = await initSqlJs()
-  const initial = existsSync(DB_PATH) ? new Uint8Array(readFileSync(DB_PATH)) : undefined
+  const initial = existsSync(dbPath) ? new Uint8Array(readFileSync(dbPath)) : undefined
   const database = new SQL.Database(initial)
 
   database.run(`
@@ -205,7 +216,7 @@ const createDatabase = async () => {
   `)
 
   const persist = () => {
-    writeFileSync(DB_PATH, Buffer.from(database.export()))
+    writeFileSync(dbPath, Buffer.from(database.export()))
   }
 
   const all = <T>(sql: string, params?: Record<string, unknown>): T[] => {
@@ -229,7 +240,11 @@ const createDatabase = async () => {
 }
 
 const getDb = async () => {
-  dbPromise ??= createDatabase()
+  const { cacheKey } = getDbPaths()
+  if (!dbPromise || dbCacheKey !== cacheKey) {
+    dbPromise = createDatabase()
+    dbCacheKey = cacheKey
+  }
   return dbPromise
 }
 

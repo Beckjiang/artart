@@ -1,4 +1,5 @@
 import type { ImageApiCallLogRecord } from './imageApiCallLog'
+import { buildApiUrl } from './runtime'
 
 type ArchiveDebugImageApiCallParams = {
   runId?: string
@@ -12,7 +13,7 @@ type ArchiveDebugImageApiCallResponse = {
   appended: boolean
 }
 
-const ENDPOINT = '/api/local-debug/save-image-api-call'
+const ENDPOINT = buildApiUrl('/api/local-debug/save-image-api-call')
 
 export const archiveDebugImageApiCall = async (
   params: ArchiveDebugImageApiCallParams
@@ -35,4 +36,3 @@ export const archiveDebugImageApiCall = async (
 
   return (await response.json()) as ArchiveDebugImageApiCallResponse
 }
-

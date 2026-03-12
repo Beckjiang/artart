@@ -7,6 +7,11 @@ import {
 } from '../../src/lib/imageApiCallLog'
 import { appendImageApiCallLogBestEffort } from '../imageApiCallLogWriter'
 import type { CanvasInsertHint } from '../../src/lib/agentChatTypes'
+import {
+  buildGeminiRequestHeaders,
+  getServerGeminiApiKey,
+  getServerGeminiBaseUrl,
+} from '../geminiConfig'
 import { getEnvValue, hasGeminiImageConfig } from './env'
 
 type GeminiImageResult = {
@@ -44,59 +49,7 @@ type GeminiResponsePayload = {
 
 const IMAGE_MODEL_FALLBACK = 'gemini-3.1-flash-image-preview'
 const IMAGE_SIZE_FALLBACK = '2K'
-const GEMINI_API_VERSION_PATH = '/v1beta'
-const GEMINI_DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
-const GEMINI_DEFAULT_ORIGIN = 'https://generativelanguage.googleapis.com'
-const DEV_PROXY_BASE_URL = '/api/gemini'
-const LEGACY_DEV_PROXY_BASE_URL = '/api/uniapi'
 const IMAGE_TO_IMAGE_FAILURE_MESSAGE = '\u56fe\u751f\u56fe\u670d\u52a1\u8c03\u7528\u5931\u8d25'
-
-const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
-
-const ensureGeminiApiBaseUrl = (value: string) => {
-  const normalized = normalizeBaseUrl(value)
-  if (!/^https?:\/\//i.test(normalized)) return normalized
-
-  try {
-    const parsed = new URL(normalized)
-    if (!parsed.pathname || parsed.pathname === '/') {
-      parsed.pathname = GEMINI_API_VERSION_PATH
-    }
-    return normalizeBaseUrl(parsed.toString())
-  } catch {
-    return normalized
-  }
-}
-
-const isProxyBaseUrl = (baseUrl: string) => {
-  const normalized = normalizeBaseUrl(baseUrl)
-  return normalized === DEV_PROXY_BASE_URL || normalized === LEGACY_DEV_PROXY_BASE_URL
-}
-
-const isOfficialGeminiBaseUrl = (baseUrl: string) => {
-  if (isProxyBaseUrl(baseUrl)) return true
-
-  try {
-    const parsed = new URL(ensureGeminiApiBaseUrl(baseUrl))
-    return parsed.origin === GEMINI_DEFAULT_ORIGIN
-  } catch {
-    return false
-  }
-}
-
-const buildGeminiRequestHeaders = (baseUrl: string, apiKey: string): Record<string, string> => {
-  if (isOfficialGeminiBaseUrl(baseUrl)) {
-    return {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
-    }
-  }
-
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
-  }
-}
 
 const isLikelyImageEditingUnsupported = (message: string) => {
   const normalized = message.toLowerCase()
@@ -219,16 +172,12 @@ const requestGeminiImage = async (
   referenceDataUrls: string[] = [],
   runId?: string
 ): Promise<GeminiImageResult> => {
-  const apiKey = getEnvValue('VITE_GEMINI_API_KEY') || getEnvValue('VITE_UNIAPI_API_KEY')
+  const apiKey = getServerGeminiApiKey()
   if (!apiKey) {
     throw new Error('missing_gemini_api_key')
   }
 
-  const baseUrl = ensureGeminiApiBaseUrl(
-    getEnvValue('VITE_GEMINI_BASE_URL') ||
-      getEnvValue('VITE_UNIAPI_BASE_URL') ||
-      GEMINI_DEFAULT_BASE_URL
-  )
+  const baseUrl = getServerGeminiBaseUrl()
   const imageModel = getEnvValue('VITE_GEMINI_IMAGE_MODEL') || IMAGE_MODEL_FALLBACK
   const imageSize = getEnvValue('VITE_GEMINI_IMAGE_SIZE') || IMAGE_SIZE_FALLBACK
   const aspectRatio = getAspectRatioValue(insertHint)

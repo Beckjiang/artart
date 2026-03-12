@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
 import type { ImageApiCallLogRecord } from './src/lib/imageApiCallLog'
 import {
   parseBooleanLike,
@@ -7,6 +5,7 @@ import {
   redactImageApiPayload,
 } from './src/lib/imageApiCallLog'
 import { appendImageApiCallLogBestEffort } from './server/imageApiCallLogWriter'
+import { getRuntimeConfigValue } from './server/runtimeConfig'
 
 type ModelProviderType = 'llm' | 'image'
 type GenerationJobType = 'topic' | 'copy' | 'image'
@@ -83,53 +82,12 @@ const DEFAULT_LLM_FALLBACK_MODEL = 'gpt-4.1-mini'
 const DEFAULT_IMAGE_PRIMARY_MODEL = 'gemini-nano-banana-2'
 const DEFAULT_BASE_URL = 'https://api.uniapi.io/v1'
 
-let envCache: Record<string, string> | null = null
 const runRecords: MainModelRunRecord[] = []
 
 const toRunId = (): string => `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
-const parseEnvFile = (): Record<string, string> => {
-  if (envCache) {
-    return envCache
-  }
-
-  const candidates = [join(process.cwd(), '.env'), join(process.cwd(), './.env')]
-  const foundPath = candidates.find((filePath) => existsSync(filePath))
-  if (!foundPath) {
-    envCache = {}
-    return envCache
-  }
-
-  const content = readFileSync(foundPath, 'utf8')
-  const lines = content.split(/\r?\n/)
-  const values: Record<string, string> = {}
-
-  lines.forEach((line) => {
-    const normalized = line.trim()
-    if (!normalized || normalized.startsWith('#')) {
-      return
-    }
-    const separator = normalized.indexOf('=')
-    if (separator <= 0) {
-      return
-    }
-    const key = normalized.slice(0, separator).trim()
-    const value = normalized.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '')
-    values[key] = value
-  })
-
-  envCache = values
-  return envCache
-}
-
 const getEnvValue = (key: string): string | undefined => {
-  const direct = process.env[key]
-  if (direct && direct.trim()) {
-    return direct.trim()
-  }
-  const parsed = parseEnvFile()
-  const value = parsed[key]
-  return value && value.trim() ? value.trim() : undefined
+  return getRuntimeConfigValue(key)
 }
 
 const normalizeBaseUrl = (value: string | undefined): string => {

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { getServerDataRoot } from './runtimeConfig'
 
 const DEBUG_IMAGE_DIR = 'debug-image-io'
 
@@ -41,8 +42,9 @@ export const appendImageApiCallLog = async (params: {
   record: unknown
 }): Promise<{ folder: string; file: string }> => {
   const now = new Date()
+  const appDataRoot = getServerDataRoot()
   const runDir = path.resolve(
-    process.cwd(),
+    appDataRoot,
     DEBUG_IMAGE_DIR,
     formatDateDir(now),
     sanitizeRunId(params.runId)
@@ -58,7 +60,7 @@ export const appendImageApiCallLog = async (params: {
   await writeJsonPretty(filePath, list)
 
   return {
-    folder: path.relative(process.cwd(), runDir),
+    folder: path.relative(appDataRoot, runDir),
     file: fileName,
   }
 }
@@ -77,4 +79,3 @@ export const appendImageApiCallLogBestEffort = async (params: {
     return null
   }
 }
-
