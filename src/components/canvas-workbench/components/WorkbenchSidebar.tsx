@@ -74,6 +74,9 @@ type WorkbenchSidebarProps = {
   onSidebarPromptChange: (value: string) => void
   onSidebarPromptKeyDown: KeyboardEventHandler<HTMLTextAreaElement>
   onSidebarAspectRatioChange: (ratio: ImageAspectRatio) => void
+  showResizer?: boolean
+  onRequestClose?: () => void
+  closeActionLabel?: string
 }
 
 export function WorkbenchSidebar({
@@ -135,10 +138,19 @@ export function WorkbenchSidebar({
   onSidebarPromptChange,
   onSidebarPromptKeyDown,
   onSidebarAspectRatioChange,
+  showResizer = true,
+  onRequestClose,
+  closeActionLabel,
 }: WorkbenchSidebarProps) {
   return (
     <aside className="canvas-workbench-sidebar">
-      <div className="canvas-workbench-sidebar-resizer" onPointerDown={onResizePointerDown} aria-hidden="true" />
+      {showResizer ? (
+        <div
+          className="canvas-workbench-sidebar-resizer"
+          onPointerDown={onResizePointerDown}
+          aria-hidden="true"
+        />
+      ) : null}
       <WorkbenchChatPanel
         boardTitle={boardTitle}
         messages={chatMessages}
@@ -150,6 +162,8 @@ export function WorkbenchSidebar({
         selectionDraft={composerSelectionDraft}
         statusText={chatStatusText}
         error={combinedError}
+        onRequestClose={onRequestClose}
+        closeActionLabel={closeActionLabel}
         onComposerChange={onChatComposerChange}
         onComposerKeyDown={onChatComposerKeyDown}
         onSubmit={onChatSubmit}

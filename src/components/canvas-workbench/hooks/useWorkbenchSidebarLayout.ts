@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
-import { SIDEBAR_WIDTH_STORAGE_KEY } from '../constants'
-import { clampSidebarWidth, getInitialViewportWidth, readStoredSidebarWidth } from '../helpers'
+import { SIDEBAR_OPEN_STORAGE_KEY, SIDEBAR_WIDTH_STORAGE_KEY } from '../constants'
+import {
+  clampSidebarWidth,
+  getInitialViewportWidth,
+  readStoredSidebarOpenPreference,
+  readStoredSidebarWidth,
+} from '../helpers'
+
+const COMPACT_WORKBENCH_BREAKPOINT = 900
 
 export function useWorkbenchSidebarLayout() {
   const [viewportWidth, setViewportWidth] = useState(() => getInitialViewportWidth())
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredSidebarWidth(getInitialViewportWidth())
+  )
+  const [sidebarOpenPreference, setSidebarOpenPreference] = useState<boolean | null>(() =>
+    readStoredSidebarOpenPreference()
   )
 
   const sidebarWidthRef = useRef(sidebarWidth)
@@ -35,8 +45,12 @@ export function useWorkbenchSidebarLayout() {
     }
   }, [])
 
-  const hasDesktopSidebar = viewportWidth > 720
-  const showSidebar = hasDesktopSidebar
+  const isCompactWorkbench = viewportWidth <= COMPACT_WORKBENCH_BREAKPOINT
+  const sidebarPresentation = isCompactWorkbench ? ('overlay' as const) : ('docked' as const)
+  const defaultSidebarOpen = !isCompactWorkbench
+  const isSidebarOpen = sidebarOpenPreference ?? defaultSidebarOpen
+  const hasDockedSidebar = sidebarPresentation === 'docked'
+  const showDockedSidebar = hasDockedSidebar && isSidebarOpen
 
   const persistSidebarWidth = useCallback((nextSidebarWidth: number) => {
     if (typeof window === 'undefined') return
@@ -47,6 +61,32 @@ export function useWorkbenchSidebarLayout() {
       return
     }
   }, [])
+
+  const persistSidebarOpen = useCallback((nextValue: boolean) => {
+    if (typeof window === 'undefined') return
+
+    try {
+      window.localStorage.setItem(SIDEBAR_OPEN_STORAGE_KEY, nextValue ? '1' : '0')
+    } catch {
+      return
+    }
+  }, [])
+
+  const openSidebar = useCallback(() => {
+    setSidebarOpenPreference(true)
+    persistSidebarOpen(true)
+  }, [persistSidebarOpen])
+
+  const closeSidebar = useCallback(() => {
+    setSidebarOpenPreference(false)
+    persistSidebarOpen(false)
+  }, [persistSidebarOpen])
+
+  const toggleSidebar = useCallback(() => {
+    const nextValue = !(sidebarOpenPreference ?? defaultSidebarOpen)
+    setSidebarOpenPreference(nextValue)
+    persistSidebarOpen(nextValue)
+  }, [defaultSidebarOpen, persistSidebarOpen, sidebarOpenPreference])
 
   const handleSidebarResizePointerMove = useCallback((event: PointerEvent) => {
     const resizeState = sidebarResizeStateRef.current
@@ -83,7 +123,7 @@ export function useWorkbenchSidebarLayout() {
 
   const handleSidebarResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!showSidebar || event.button !== 0) return
+      if (!showDockedSidebar || event.button !== 0) return
 
       stopSidebarResize()
       sidebarResizeStateRef.current = {
@@ -98,7 +138,7 @@ export function useWorkbenchSidebarLayout() {
       window.addEventListener('pointercancel', handleSidebarResizePointerUp)
       event.preventDefault()
     },
-    [showSidebar, stopSidebarResize, handleSidebarResizePointerMove, handleSidebarResizePointerUp]
+    [showDockedSidebar, stopSidebarResize, handleSidebarResizePointerMove, handleSidebarResizePointerUp]
   )
 
   useEffect(() => {
@@ -110,16 +150,21 @@ export function useWorkbenchSidebarLayout() {
   const workbenchStyle = useMemo(
     () =>
       ({
-        '--assistant-panel-width': showSidebar ? `${sidebarWidth}px` : '0px',
+        '--assistant-panel-width': showDockedSidebar ? `${sidebarWidth}px` : '0px',
       }) as CSSProperties,
-    [showSidebar, sidebarWidth]
+    [showDockedSidebar, sidebarWidth]
   )
 
   return {
     viewportWidth,
     sidebarWidth,
-    hasDesktopSidebar,
-    showSidebar,
+    isCompactWorkbench,
+    sidebarPresentation,
+    hasDockedSidebar,
+    isSidebarOpen,
+    openSidebar,
+    closeSidebar,
+    toggleSidebar,
     workbenchStyle,
     handleSidebarResizePointerDown,
   }

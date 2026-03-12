@@ -9,7 +9,7 @@ import { createLocalDebugHandler } from './localDebugApi'
 import { configureServerRuntime } from './runtimeConfig'
 import type { NextHandleFunction } from './httpUtils'
 
-type LocalApiMode = 'vite' | 'desktop'
+type LocalApiMode = 'vite' | 'desktop' | 'pwa'
 
 type CreateLocalApiHandlerOptions = {
   mode: LocalApiMode
@@ -17,6 +17,7 @@ type CreateLocalApiHandlerOptions = {
   envFileDir?: string
   configFilePath?: string
   staticDir?: string
+  enableLocalDebug?: boolean
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -24,6 +25,7 @@ const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -107,11 +109,30 @@ export const createLocalApiHandler = (
     configFilePath: options.configFilePath,
   })
 
+  const enableLocalDebug = (() => {
+    if (options.enableLocalDebug !== undefined) {
+      return options.enableLocalDebug
+    }
+
+    if (options.mode === 'vite' || options.mode === 'desktop') {
+      return true
+    }
+
+    const override = process.env.CANVAS_ENABLE_LOCAL_DEBUG?.trim().toLowerCase()
+    if (override === '1' || override === 'true') return true
+    if (override === '0' || override === 'false') return false
+
+    return process.env.NODE_ENV !== 'production'
+  })()
+
   const handlers: NextHandleFunction[] = [
-    createLocalDebugHandler(),
     createGeminiProxyHandler(),
     createAgentApiHandler(),
   ]
+
+  if (enableLocalDebug) {
+    handlers.unshift(createLocalDebugHandler())
+  }
 
   return async (req, res, next) => {
     for (const handler of handlers) {

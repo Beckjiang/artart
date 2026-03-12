@@ -26,6 +26,8 @@ type WorkbenchChatPanelProps = {
   selectionDraft: ComposerSelectionDraft | null
   statusText: string
   error?: string
+  onRequestClose?: () => void
+  closeActionLabel?: string
   onComposerChange: (value: string) => void
   onComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -149,6 +151,8 @@ export function WorkbenchChatPanel({
   selectionDraft,
   statusText,
   error,
+  onRequestClose,
+  closeActionLabel = '收起',
   onComposerChange,
   onComposerKeyDown,
   onSubmit,
@@ -182,11 +186,28 @@ export function WorkbenchChatPanel({
             <h2 className="workbench-chat-title">{headerTitle}</h2>
             <p className="workbench-chat-subtitle">{headerSubtitle}</p>
           </div>
-          <div className="workbench-chat-header-actions" aria-hidden="true">
-            <span className="workbench-chat-icon-button">＋</span>
-            <span className="workbench-chat-icon-button">⌄</span>
-            <span className="workbench-chat-icon-button">⤴</span>
-            <span className="workbench-chat-icon-button is-strong">→</span>
+          <div className="workbench-chat-header-actions">
+            {onRequestClose ? (
+              <button
+                type="button"
+                className="workbench-chat-icon-button is-strong"
+                onClick={onRequestClose}
+                aria-label={closeActionLabel}
+                title={closeActionLabel}
+              >
+                ×
+              </button>
+            ) : null}
+
+            <span className="workbench-chat-icon-button" aria-hidden="true">
+              ＋
+            </span>
+            <span className="workbench-chat-icon-button" aria-hidden="true">
+              ⌄
+            </span>
+            <span className="workbench-chat-icon-button" aria-hidden="true">
+              ⤴
+            </span>
           </div>
         </div>
         <div className="workbench-chat-status-badge">

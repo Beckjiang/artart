@@ -532,7 +532,12 @@ body.is-resizing-workbench-sidebar {
 
 .canvas-workbench-topbar,
 .canvas-workbench-toolbar,
+.workbench-fab-shell,
+.workbench-fab-scrim,
 .canvas-workbench-sidebar,
+.canvas-workbench-sidebar-overlay,
+.canvas-workbench-overlay-scrim,
+.canvas-workbench-chat-pill,
 .canvas-workbench-actionbar,
 .canvas-workbench-imaginebar,
 .generator-card-header,
@@ -545,9 +550,9 @@ body.is-resizing-workbench-sidebar {
 
 .canvas-workbench-topbar {
   position: absolute;
-  top: 14px;
-  left: 16px;
-  right: calc(var(--assistant-panel-width) + 16px);
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(16px + env(safe-area-inset-left));
+  right: calc(var(--assistant-panel-width) + 16px + env(safe-area-inset-right));
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -707,6 +712,101 @@ body.is-resizing-workbench-sidebar {
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
+}
+
+.workbench-fab-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 3350;
+  border: 0;
+  padding: 0;
+  background: rgba(242, 246, 252, 0.34);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  backdrop-filter: blur(10px) saturate(160%);
+}
+
+.workbench-fab-shell {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 3400;
+  display: grid;
+  place-items: center;
+}
+
+.workbench-fab-menu {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  width: 0;
+  height: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.workbench-fab-menu.is-open {
+  pointer-events: auto;
+}
+
+.workbench-fab-item {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(205, 214, 228, 0.92);
+  border-radius: 18px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.84);
+  color: #2a3853;
+  box-shadow: 0 12px 28px rgba(18, 30, 56, 0.12);
+  opacity: 0;
+  transform: translate(0px, 0px) scale(0.92);
+  pointer-events: none;
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    opacity 130ms ease;
+}
+
+.workbench-fab-menu.is-open .workbench-fab-item {
+  opacity: 1;
+  transform: translate(var(--fab-x), var(--fab-y)) scale(1);
+  pointer-events: auto;
+}
+
+.workbench-fab-item:hover {
+  background: rgba(247, 251, 255, 0.95);
+  transform: translate(var(--fab-x), var(--fab-y)) scale(1.02);
+}
+
+.workbench-fab-item.is-active {
+  border-color: rgba(17, 23, 35, 0.85);
+  background: rgba(17, 23, 35, 0.92);
+  color: #ffffff;
+}
+
+.workbench-fab-button {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  border: 0;
+  padding: 0;
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  background: linear-gradient(135deg, var(--brand) 0%, #0ea679 100%);
+  box-shadow:
+    0 16px 34px rgba(18, 30, 56, 0.22),
+    0 2px 0 rgba(255, 255, 255, 0.55) inset;
+}
+
+.workbench-fab-shell.is-open .workbench-fab-button {
+  background: linear-gradient(135deg, #1d2430 0%, #10131a 100%);
 }
 
 .workbench-toolbar-divider {
@@ -1726,9 +1826,9 @@ body.is-resizing-workbench-sidebar {
 
 .canvas-workbench-sidebar {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  bottom: 8px;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(8px + env(safe-area-inset-right));
+  bottom: calc(8px + env(safe-area-inset-bottom));
   width: var(--assistant-panel-width);
   min-width: 0;
   display: flex;
@@ -1739,6 +1839,69 @@ body.is-resizing-workbench-sidebar {
   backdrop-filter: blur(14px);
   overflow: hidden;
   border-radius: 28px;
+}
+
+.canvas-workbench-chat-pill {
+  position: absolute;
+  top: calc(72px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  z-index: 3200;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 14px 30px rgba(18, 30, 56, 0.14);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  color: #223252;
+  font-weight: 700;
+}
+
+.canvas-workbench-chat-pill:hover {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.canvas-workbench-sidebar-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3450;
+}
+
+.canvas-workbench-overlay-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(18, 30, 56, 0.18);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  animation: workbench-scrim-fade-in 140ms ease-out both;
+}
+
+.canvas-workbench-sidebar-overlay .canvas-workbench-sidebar {
+  width: min(420px, calc(100vw - 16px));
+  animation: workbench-sidebar-slide-in 180ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+@keyframes workbench-scrim-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes workbench-sidebar-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0px);
+    opacity: 1;
+  }
 }
 
 .canvas-workbench-sidebar-resizer {
@@ -1822,7 +1985,10 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
+  border: 0;
+  padding: 0;
   background: rgba(255, 255, 255, 0.42);
+  color: inherit;
   font-size: 13px;
   line-height: 1;
 }
@@ -2792,8 +2958,8 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   }
 
   .canvas-workbench-topbar {
-    left: 12px;
-    right: calc(var(--assistant-panel-width) + 12px);
+    left: calc(12px + env(safe-area-inset-left));
+    right: calc(var(--assistant-panel-width) + 12px + env(safe-area-inset-right));
   }
 
   .canvas-workbench-toolbar {
@@ -2840,20 +3006,16 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
 }
 
 @media (max-width: 720px) {
-  .canvas-workbench {
-    --assistant-panel-width: 0px;
-  }
-
   .canvas-workbench-topbar {
-    right: 12px;
+    right: calc(12px + env(safe-area-inset-right));
   }
 
   .canvas-workbench-zoom {
     display: none;
   }
 
-  .canvas-workbench-toolbar {
-    bottom: 12px;
+  .workbench-fab-shell {
+    bottom: calc(12px + env(safe-area-inset-bottom));
   }
 
   .generator-card-header {
@@ -2924,7 +3086,4 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
     min-width: calc(50% - 5px);
   }
 
-  .canvas-workbench-sidebar {
-    display: none;
-  }
 }

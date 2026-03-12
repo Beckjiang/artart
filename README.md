@@ -100,6 +100,54 @@ npm test
 npm run build
 ```
 
+## PWA（iPad/移动端）
+
+当前 Web 版已支持作为 PWA 安装到 iPad（以及其他移动端/桌面端浏览器），并针对窄屏做了交互重排：
+
+- iPad 竖屏/窄屏：底部工具栏收敛为一个 FAB（圆形扇形菜单）；右侧 Chat 变为覆盖式抽屉（默认收起，可随时呼出）。
+- iPad 横屏/宽屏：保留原工具栏 + 右侧停靠侧栏；侧栏支持收起，并在收起时提供一个浮动 `Chat` 按钮重新打开。
+
+### 构建与运行（同源 API，避免 CORS）
+
+PWA 要让 Chat 真正可用，需要同源后端同时提供：
+
+- 静态资源（`dist/`）
+- `/api/agent/*`（会话/SSE）
+- `/api/gemini/*`（Gemini 代理）
+
+项目内置了一个可部署的 Node 服务入口 `server/pwaServer.ts`，可直接承载上述内容。
+
+```bash
+npm install
+npm run build:pwa
+npm run start:pwa
+```
+
+默认监听：`http://127.0.0.1:45123`
+
+> 提示：如果你要在局域网用 iPad 访问，请设置 `CANVAS_HOST=0.0.0.0`，并使用电脑的局域网 IP 访问；若要“添加到主屏幕”并启用 Service Worker，一般需要 HTTPS（`localhost` 例外）。
+
+### 环境变量（PWA Server）
+
+- `CANVAS_HOST`：监听地址，默认 `127.0.0.1`
+- `CANVAS_PORT`：监听端口，默认 `45123`
+- `CANVAS_STATIC_DIR`：静态目录，默认 `<repo>/dist`
+- `CANVAS_DATA_ROOT`：数据目录，默认 `<repo>/.data`
+- `CANVAS_CONFIG_PATH`：配置文件路径，默认 `<dataRoot>/config.json`
+- `CANVAS_ENABLE_LOCAL_DEBUG=1`：显式开启 `/api/local-debug/*`（写盘调试接口）
+
+安全说明：
+
+- PWA server 的 `/api/local-debug/*` 在 `NODE_ENV=production` 时默认关闭，避免把写盘接口暴露到公网。
+- 仅当设置 `CANVAS_ENABLE_LOCAL_DEBUG=1`（或 `true`）时才会启用。
+
+### iPad 安装指引（Safari）
+
+1. 用 Safari 打开你的站点（推荐 HTTPS 域名，或本机 `localhost`）。
+2. 点击分享按钮（Share）。
+3. 选择 “Add to Home Screen / 添加到主屏幕”。
+4. 从主屏幕打开后会以 `standalone` 模式运行（更接近 App 体验）。
+
 ## 当前数据结构
 
 - 画布元数据：`localStorage["canvas:mvp:boards"]`

@@ -15,6 +15,7 @@ export const MIN_SIDEBAR_WIDTH = 340
 export const MAX_SIDEBAR_WIDTH = 560
 export const MIN_WORKBENCH_CANVAS_WIDTH = 240
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'canvas.workbench.sidebar-width'
+export const SIDEBAR_OPEN_STORAGE_KEY = 'canvas.workbench.sidebar-open'
 export const BOARD_TOUCH_DEBOUNCE = 1200
 export const DEFAULT_GENERATOR_ASPECT_RATIO: ImageAspectRatio = '1:1'
 export const {

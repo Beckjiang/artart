@@ -10,6 +10,7 @@ import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
   MIN_WORKBENCH_CANVAS_WIDTH,
+  SIDEBAR_OPEN_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
   TASK_TARGET_REMOVED,
 } from './constants'
@@ -126,6 +127,24 @@ export const readStoredSidebarWidth = (viewportWidth = getInitialViewportWidth()
     return clampSidebarWidth(parsed, viewportWidth)
   } catch {
     return clampSidebarWidth(DEFAULT_SIDEBAR_WIDTH, viewportWidth)
+  }
+}
+
+export const readStoredSidebarOpenPreference = (): boolean | null => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(SIDEBAR_OPEN_STORAGE_KEY)
+    if (!rawValue) return null
+
+    const normalized = rawValue.trim().toLowerCase()
+    if (normalized === '1' || normalized === 'true') return true
+    if (normalized === '0' || normalized === 'false') return false
+    return null
+  } catch {
+    return null
   }
 }
 

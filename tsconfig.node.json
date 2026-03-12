@@ -21,6 +21,7 @@
   "include": [
     "vite.config.ts",
     "tsup.electron.config.ts",
+    "tsup.pwa.config.ts",
     "modelGateway.ts",
     "server/**/*.ts",
     "server/**/*.d.ts",

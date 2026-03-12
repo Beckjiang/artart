@@ -48,6 +48,7 @@ import type {
 } from '../../lib/maskedImageEdit'
 import { GeneratorPromptDock } from './components/GeneratorPromptDock'
 import { WorkbenchActionBars } from './components/WorkbenchActionBars'
+import { WorkbenchFabMenu } from './components/WorkbenchFabMenu'
 import { WorkbenchSidebar } from './components/WorkbenchSidebar'
 import { WorkbenchToolbar } from './components/WorkbenchToolbar'
 import { WorkbenchTopbar } from './components/WorkbenchTopbar'
@@ -120,8 +121,17 @@ import type {
 export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchProps) {
   const editor = useEditor()
   const tools = useTools()
-  const { sidebarWidth, showSidebar, workbenchStyle, handleSidebarResizePointerDown } =
-    useWorkbenchSidebarLayout()
+  const {
+    sidebarWidth,
+    isCompactWorkbench,
+    sidebarPresentation,
+    isSidebarOpen,
+    openSidebar,
+    closeSidebar,
+    toggleSidebar,
+    workbenchStyle,
+    handleSidebarResizePointerDown,
+  } = useWorkbenchSidebarLayout()
   const {
     currentToolId,
     currentGeo,
@@ -736,11 +746,15 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     }
   }, [])
 
+  const showDockedSidebar = sidebarPresentation === 'docked' && isSidebarOpen
+  const showOverlaySidebar = sidebarPresentation === 'overlay' && isSidebarOpen
+  const showDockedChatPill = sidebarPresentation === 'docked' && !isSidebarOpen
+
   const floatingActionStyle = useMemo<CSSProperties | null>(() => {
     const bounds = selectionState.selectionBounds
     if (isCameraAngleOpen || !selectionState.canShowFloatingActions || !bounds) return null
 
-    const sidebarOffset = showSidebar ? sidebarWidth : 0
+    const sidebarOffset = showDockedSidebar ? sidebarWidth : 0
     const left = Math.min(bounds.midX, Math.max(120, window.innerWidth - sidebarOffset - 48))
 
     return {
@@ -751,7 +765,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     isCameraAngleOpen,
     selectionState.canShowFloatingActions,
     selectionState.selectionBounds,
-    showSidebar,
+    showDockedSidebar,
     sidebarWidth,
   ])
 
@@ -759,14 +773,14 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     const bounds = selectionState.selectionBounds
     if (!selectionState.canImagineSelection || !bounds) return null
 
-    const sidebarOffset = showSidebar ? sidebarWidth : 0
+    const sidebarOffset = showDockedSidebar ? sidebarWidth : 0
     const left = Math.min(bounds.midX, Math.max(120, window.innerWidth - sidebarOffset - 48))
 
     return {
       left,
       top: Math.min(window.innerHeight - 96, bounds.bottom + 18),
     }
-  }, [selectionState.canImagineSelection, selectionState.selectionBounds, showSidebar, sidebarWidth])
+  }, [selectionState.canImagineSelection, selectionState.selectionBounds, showDockedSidebar, sidebarWidth])
 
   const generatorOverlayLayout = useMemo(() => {
     const bounds = selectionState.selectionBounds
@@ -2512,6 +2526,19 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     event.preventDefault()
   }, [])
 
+  useEffect(() => {
+    if (!showOverlaySidebar) return
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeSidebar()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [closeSidebar, showOverlaySidebar])
+
   const selectionMessage = useMemo(() => {
     if (assistantMode === 'disabled') {
       if (selectionNeedsImagineImage) {
@@ -2719,8 +2746,99 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [handleCancelTask, handleRetryTask, handleSelectTaskResult]
   )
 
+  const renderWorkbenchSidebar = (options: { showResizer: boolean; closeActionLabel: string }) => (
+    <WorkbenchSidebar
+      boardTitle={board.title}
+      tasks={tasks}
+      chatMessages={chatMessages}
+      chatLoading={chatLoading}
+      sidebarPrompt={sidebarPrompt}
+      chatComposerPlaceholder={chatComposerPlaceholder}
+      chatComposerDisabled={Boolean(chatRunId || chatSubmitting)}
+      canSubmitChat={canSubmitChat}
+      composerSelectionDraft={composerSelectionDraft}
+      chatStatusText={chatStatusText}
+      combinedError={sidebarError || chatError}
+      selectedImagePreview={selectedImagePreview}
+      selectionCardTitle={selectionCardTitle}
+      selectionMessage={selectionMessage}
+      assistantMode={assistantMode}
+      maskEnabled={maskEnabled}
+      showMaskOverlay={showMaskOverlay}
+      maskStatusText={maskStatusText}
+      canUseMaskEditor={canUseMaskEditor}
+      maskTool={maskTool}
+      maskBrushSize={maskBrushSize}
+      maskStrokeCount={maskStrokes.length}
+      activePresetLabel={activePresetDefinition.label}
+      presetHelperText={presetHelperText}
+      sidebarAspectRatio={sidebarAspectRatio}
+      emptyTaskMessage={emptyTaskMessage}
+      runningCount={runningCount}
+      queueCount={queueCount}
+      successCount={successCount}
+      canSubmitSidebarPrompt={canSubmitSidebarPrompt}
+      canGenerateSidebar={canGenerateSidebar}
+      activePlaceholder={activePresetDefinition.placeholder}
+      chatInputRef={sidebarPromptInputRef}
+      maskPreviewStageRef={maskPreviewStageRef}
+      maskPreviewCanvasRef={maskPreviewCanvasRef}
+      onResizePointerDown={handleSidebarResizePointerDown}
+      showResizer={options.showResizer}
+      onRequestClose={closeSidebar}
+      closeActionLabel={options.closeActionLabel}
+      onChatComposerChange={handleSidebarPromptChange}
+      onChatComposerKeyDown={handleChatPromptKeyDown}
+      onChatSubmit={handleChatFormSubmit}
+      onRemoveSelectionDraft={() => setDismissedSelectionKey(selectedShapeIdsKey || '__empty__')}
+      onLocateAttachment={handleLocateChatAttachment}
+      onReuseAttachment={handleReuseChatAttachment}
+      onPreviewImageError={handlePreviewImageError}
+      onMaskPointerDown={handleMaskPointerDown}
+      onMaskPointerMove={handleMaskPointerMove}
+      onMaskPointerEnd={handleMaskPointerEnd}
+      onToggleMaskEnabled={() => {
+        setMaskEnabled((value) => !value)
+        setShowMaskOverlay(true)
+        setSidebarError('')
+      }}
+      onSelectMaskTool={setMaskTool}
+      onBrushSizeChange={setMaskBrushSize}
+      onToggleMaskOverlay={() => setShowMaskOverlay((value) => !value)}
+      onClearMask={() => {
+        setMaskStrokes([])
+        setSidebarError('')
+      }}
+      onToolbarMouseDown={handleToolbarMouseDown}
+      onSelectTaskResult={handleSelectTaskResult}
+      renderTaskActionButton={renderTaskActionButton}
+      onSidebarSubmit={handleSidebarFormSubmit}
+      onSidebarPromptChange={(value) => {
+        setSidebarPrompt(value)
+        setSidebarError('')
+      }}
+      onSidebarPromptKeyDown={handleSidebarPromptKeyDown}
+      onSidebarAspectRatioChange={(ratio) =>
+        setSidebarAspectRatioOverride({
+          shapeId: selectedImage?.id ?? null,
+          ratio,
+        })
+      }
+    />
+  )
+
   return (
-    <div className={`canvas-workbench ${showSidebar ? 'has-sidebar' : 'no-sidebar'}`} style={workbenchStyle}>
+    <div
+      className={[
+        'canvas-workbench',
+        showDockedSidebar ? 'has-sidebar' : '',
+        showDockedChatPill ? 'no-sidebar' : '',
+        isCompactWorkbench ? 'is-compact' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      style={workbenchStyle}
+    >
       <WorkbenchTopbar
         zoomPercent={zoomPercent}
         onZoomOut={() => editor.zoomOut()}
@@ -2729,13 +2847,25 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         onToolbarMouseDown={handleToolbarMouseDown}
       />
 
-      <WorkbenchToolbar
-        assistantMode={assistantMode}
-        getToolIsActive={getToolIsActive}
-        onToolSelect={handleToolSelect}
-        onCreateGeneratorCard={() => createGeneratorCard()}
-        onToolbarMouseDown={handleToolbarMouseDown}
-      />
+      {isCompactWorkbench ? (
+        <WorkbenchFabMenu
+          assistantMode={assistantMode}
+          isChatOpen={isSidebarOpen}
+          getToolIsActive={getToolIsActive}
+          onToolSelect={handleToolSelect}
+          onCreateGeneratorCard={() => createGeneratorCard()}
+          onToggleChat={toggleSidebar}
+          onToolbarMouseDown={handleToolbarMouseDown}
+        />
+      ) : (
+        <WorkbenchToolbar
+          assistantMode={assistantMode}
+          getToolIsActive={getToolIsActive}
+          onToolSelect={handleToolSelect}
+          onCreateGeneratorCard={() => createGeneratorCard()}
+          onToolbarMouseDown={handleToolbarMouseDown}
+        />
+      )}
 
       <WorkbenchActionBars
         floatingActionStyle={floatingActionStyle}
@@ -2804,82 +2934,31 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         canApply={cameraCanRun}
       />
 
-      {showSidebar ? (
-        <WorkbenchSidebar
-          boardTitle={board.title}
-          tasks={tasks}
-          chatMessages={chatMessages}
-          chatLoading={chatLoading}
-          sidebarPrompt={sidebarPrompt}
-          chatComposerPlaceholder={chatComposerPlaceholder}
-          chatComposerDisabled={Boolean(chatRunId || chatSubmitting)}
-          canSubmitChat={canSubmitChat}
-          composerSelectionDraft={composerSelectionDraft}
-          chatStatusText={chatStatusText}
-          combinedError={sidebarError || chatError}
-          selectedImagePreview={selectedImagePreview}
-          selectionCardTitle={selectionCardTitle}
-          selectionMessage={selectionMessage}
-          assistantMode={assistantMode}
-          maskEnabled={maskEnabled}
-          showMaskOverlay={showMaskOverlay}
-          maskStatusText={maskStatusText}
-          canUseMaskEditor={canUseMaskEditor}
-          maskTool={maskTool}
-          maskBrushSize={maskBrushSize}
-          maskStrokeCount={maskStrokes.length}
-          activePresetLabel={activePresetDefinition.label}
-          presetHelperText={presetHelperText}
-          sidebarAspectRatio={sidebarAspectRatio}
-          emptyTaskMessage={emptyTaskMessage}
-          runningCount={runningCount}
-          queueCount={queueCount}
-          successCount={successCount}
-          canSubmitSidebarPrompt={canSubmitSidebarPrompt}
-          canGenerateSidebar={canGenerateSidebar}
-          activePlaceholder={activePresetDefinition.placeholder}
-          chatInputRef={sidebarPromptInputRef}
-          maskPreviewStageRef={maskPreviewStageRef}
-          maskPreviewCanvasRef={maskPreviewCanvasRef}
-          onResizePointerDown={handleSidebarResizePointerDown}
-          onChatComposerChange={handleSidebarPromptChange}
-          onChatComposerKeyDown={handleChatPromptKeyDown}
-          onChatSubmit={handleChatFormSubmit}
-          onRemoveSelectionDraft={() => setDismissedSelectionKey(selectedShapeIdsKey || '__empty__')}
-          onLocateAttachment={handleLocateChatAttachment}
-          onReuseAttachment={handleReuseChatAttachment}
-          onPreviewImageError={handlePreviewImageError}
-          onMaskPointerDown={handleMaskPointerDown}
-          onMaskPointerMove={handleMaskPointerMove}
-          onMaskPointerEnd={handleMaskPointerEnd}
-          onToggleMaskEnabled={() => {
-            setMaskEnabled((value) => !value)
-            setShowMaskOverlay(true)
-            setSidebarError('')
-          }}
-          onSelectMaskTool={setMaskTool}
-          onBrushSizeChange={setMaskBrushSize}
-          onToggleMaskOverlay={() => setShowMaskOverlay((value) => !value)}
-          onClearMask={() => {
-            setMaskStrokes([])
-            setSidebarError('')
-          }}
-          onToolbarMouseDown={handleToolbarMouseDown}
-          onSelectTaskResult={handleSelectTaskResult}
-          renderTaskActionButton={renderTaskActionButton}
-          onSidebarSubmit={handleSidebarFormSubmit}
-          onSidebarPromptChange={(value) => {
-            setSidebarPrompt(value)
-            setSidebarError('')
-          }}
-          onSidebarPromptKeyDown={handleSidebarPromptKeyDown}
-          onSidebarAspectRatioChange={(ratio) =>
-            setSidebarAspectRatioOverride({
-              shapeId: selectedImage?.id ?? null,
-              ratio,
-            })
-          }
-        />
+      {showDockedSidebar ? renderWorkbenchSidebar({ showResizer: true, closeActionLabel: '收起' }) : null}
+
+      {showDockedChatPill ? (
+        <button
+          type="button"
+          className="canvas-workbench-chat-pill"
+          onClick={openSidebar}
+          onMouseDown={handleToolbarMouseDown}
+          aria-label="打开 Chat 面板"
+          title="打开 Chat 面板"
+        >
+          Chat
+        </button>
+      ) : null}
+
+      {showOverlaySidebar ? (
+        <div className="canvas-workbench-sidebar-overlay" role="dialog" aria-modal="true">
+          <button
+            type="button"
+            className="canvas-workbench-overlay-scrim"
+            onClick={closeSidebar}
+            aria-label="关闭 Chat 面板"
+          />
+          {renderWorkbenchSidebar({ showResizer: false, closeActionLabel: '关闭' })}
+        </div>
       ) : null}
     </div>
   )

@@ -87,17 +87,16 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
   const commitRafRef = useRef<number | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
   const pendingCommitRef = useRef<CameraViewDraft | null>(null)
+  const releaseAfterCommitRef = useRef(false)
   const lastCommittedRef = useRef<CameraViewDraft>(clampCameraView(cameraView))
 
-  const [draftView, setDraftView] = useState(() => clampCameraView(cameraView))
+  const clampedCameraView = useMemo(() => clampCameraView(cameraView), [cameraView])
+  const [dragDraftView, setDragDraftView] = useState<CameraViewDraft | null>(null)
+  const renderView = dragDraftView ?? clampedCameraView
 
   useEffect(() => {
-    const next = clampCameraView(cameraView)
-    lastCommittedRef.current = next
-    if (!dragStateRef.current) {
-      setDraftView(next)
-    }
-  }, [cameraView])
+    lastCommittedRef.current = clampedCameraView
+  }, [clampedCameraView])
 
   useEffect(() => {
     return () => {
@@ -128,6 +127,11 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
 
       lastCommittedRef.current = next
       onChangeView(next)
+
+      if (releaseAfterCommitRef.current && !dragStateRef.current) {
+        releaseAfterCommitRef.current = false
+        requestAnimationFrame(() => setDragDraftView(null))
+      }
     })
   }, [onChangeView])
 
@@ -137,19 +141,20 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
       if (!orbit) return
 
       const rect = orbit.getBoundingClientRect()
+      const base = pendingCommitRef.current ?? lastCommittedRef.current
       const next = mapPointerToCameraView(
         rect,
         clientX,
         clientY,
-        pendingCommitRef.current?.yawDeg ?? draftView.yawDeg,
-        draftView.depthProgress
+        base.yawDeg,
+        base.depthProgress
       )
 
       pendingCommitRef.current = next
-      setDraftView(next)
+      setDragDraftView(next)
       scheduleCommit()
     },
-    [draftView.depthProgress, draftView.yawDeg, scheduleCommit]
+    [scheduleCommit]
   )
 
   const handleCameraPointerDown = useCallback(
@@ -160,6 +165,7 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
       const handle = cameraHandleRef.current
       if (!handle) return
 
+      releaseAfterCommitRef.current = false
       dragStateRef.current = { pointerId: event.pointerId }
       handle.setPointerCapture(event.pointerId)
       updateFromPointer(event.clientX, event.clientY)
@@ -185,6 +191,7 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
     }
 
     dragStateRef.current = null
+    releaseAfterCommitRef.current = true
   }, [])
 
   const handleWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
@@ -193,16 +200,18 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
   }, [])
 
   const cameraPosition = useMemo(() => {
-    const ny = clamp(draftView.pitchDeg / 55, -1, 1)
+    const ny = clamp(renderView.pitchDeg / 55, -1, 1)
     const xLimit = Math.sqrt(Math.max(0, 1 - ny * ny))
-    const nx = clamp(draftView.yawDeg / 90, -1, 1) * xLimit
+    const nx = clamp(renderView.yawDeg / 90, -1, 1) * xLimit
     return { nx, ny }
-  }, [draftView.pitchDeg, draftView.yawDeg])
+  }, [renderView.pitchDeg, renderView.yawDeg])
 
   const photoScale = useMemo(() => {
-    const distanceScale = depthProgressToDistanceScale(draftView.depthProgress || DEFAULT_CAMERA_VIEW.depthProgress)
+    const distanceScale = depthProgressToDistanceScale(
+      renderView.depthProgress || DEFAULT_CAMERA_VIEW.depthProgress
+    )
     return 1 / Math.max(1e-6, distanceScale)
-  }, [draftView.depthProgress])
+  }, [renderView.depthProgress])
 
   return (
     <div
@@ -262,4 +271,3 @@ export function CameraAngleOrbitPreview({ sourcePreviewUrl, cameraView, onChange
     </div>
   )
 }
-
