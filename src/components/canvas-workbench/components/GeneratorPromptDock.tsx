@@ -22,6 +22,7 @@ type GeneratorPromptDockProps = {
   generatorImageModel: ImageGeneratorModel
   generatorImageSize: ImageGenerationSize
   generatorAspectRatio: ImageAspectRatio
+  generatorImageCount: number
   generatorError: string
   generatorStatusText: string
   generatorTaskFailed: boolean
@@ -34,6 +35,7 @@ type GeneratorPromptDockProps = {
   onModelChange: (value: ImageGeneratorModel) => void
   onSizeChange: (value: ImageGenerationSize) => void
   onAspectRatioChange: (value: ImageAspectRatio) => void
+  onCountChange: (value: number) => void
   onCancel: () => void
 }
 
@@ -46,6 +48,7 @@ export function GeneratorPromptDock({
   generatorImageModel,
   generatorImageSize,
   generatorAspectRatio,
+  generatorImageCount,
   generatorError,
   generatorStatusText,
   generatorTaskFailed,
@@ -58,6 +61,7 @@ export function GeneratorPromptDock({
   onModelChange,
   onSizeChange,
   onAspectRatioChange,
+  onCountChange,
   onCancel,
 }: GeneratorPromptDockProps) {
   if (!visible || !layout) return null
@@ -128,6 +132,20 @@ export function GeneratorPromptDock({
                 {IMAGE_GENERATION_SIZES.map((imageSize) => (
                   <option key={imageSize} value={imageSize}>
                     {imageSize}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                className="generator-count-select"
+                value={generatorImageCount}
+                disabled={generatorBusy}
+                aria-label="选择生成数量"
+                onChange={(event) => onCountChange(Number(event.target.value))}
+              >
+                {[1, 2, 3, 4].map((count) => (
+                  <option key={count} value={count}>
+                    x{count}
                   </option>
                 ))}
               </select>

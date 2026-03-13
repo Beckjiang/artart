@@ -276,6 +276,10 @@ describe('shouldRecreateTaskTarget', () => {
     expect(shouldRecreateTaskTarget('selection-imagine-actionbar')).toBe(true)
   })
 
+  it('recreates targets for generator batch tasks', () => {
+    expect(shouldRecreateTaskTarget('image-generator-batch')).toBe(true)
+  })
+
   it('does not recreate targets for generator cards', () => {
     expect(shouldRecreateTaskTarget('image-generator-card')).toBe(false)
   })

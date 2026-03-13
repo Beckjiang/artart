@@ -1906,7 +1906,8 @@ body.is-resizing-workbench-sidebar {
   color: #8e98ac;
 }
 
-.generator-size-select {
+.generator-size-select,
+.generator-count-select {
   border: 1px solid #c8d5eb;
   border-radius: 12px;
   background: #fff;
@@ -1917,12 +1918,14 @@ body.is-resizing-workbench-sidebar {
   border-width: 0px;
 }
 
-.generator-size-select:focus {
+.generator-size-select:focus,
+.generator-count-select:focus {
   border-color: #5a7fbf;
   box-shadow: 0 0 0 3px rgba(80, 122, 194, 0.15);
 }
 
-.generator-size-select:disabled {
+.generator-size-select:disabled,
+.generator-count-select:disabled {
   background: #f5f7fb;
   color: #8e98ac;
   cursor: not-allowed;
@@ -3173,6 +3176,10 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
     justify-content: stretch;
   }
 
+  .generator-prompt-actions {
+    flex-wrap: wrap;
+  }
+
   .generator-prompt-field,
   .generator-prompt-field--ratio {
     width: 100%;
@@ -3180,8 +3187,12 @@ body.is-resizing-workbench-sidebar .canvas-workbench-sidebar-resizer::before {
   }
 
   .generator-size-select,
+  .generator-count-select {
+    flex: 1 1 120px;
+  }
+
   .generator-prompt-actions > button {
-    flex: 1;
+    flex: 1 1 100%;
   }
 
   .camera-angle-overlay {

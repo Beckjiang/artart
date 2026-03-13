@@ -81,6 +81,12 @@ describe('canvas workbench helpers', () => {
     expect(meta.canvasRole).toBe('image-generator')
     expect(meta.aspectRatio).toBe('16:9')
     expect(meta.lastPrompt).toBe('')
+    expect(meta.imageCount).toBe(1)
+  })
+
+  it('clamps generator image counts into 1..4', () => {
+    expect(createGeneratorMeta('1:1', '', undefined, undefined, 0).imageCount).toBe(1)
+    expect(createGeneratorMeta('1:1', '', undefined, undefined, 999).imageCount).toBe(4)
   })
 
   it('normalizes new text-tool text shapes to 16px', () => {

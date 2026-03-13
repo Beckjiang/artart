@@ -39,6 +39,7 @@ export type GeneratorShapeMeta = {
   lastPrompt: string
   imageModel: ImageGeneratorModel
   imageSize: ImageGenerationSize
+  imageCount: number
 }
 
 export type CameraSourceSize = {
@@ -68,6 +69,7 @@ export type GenerationTask = {
   aspectRatio: ImageAspectRatio
   imageModel?: ImageGeneratorModel
   imageSize?: ImageGenerationSize
+  imageCount?: number
   status: TaskStatus
   error?: string
   width: number

@@ -76,6 +76,7 @@ import {
   ACTION_PRESETS,
   BOARD_TOUCH_DEBOUNCE,
   DEFAULT_GENERATOR_ASPECT_RATIO,
+  DEFAULT_GENERATOR_IMAGE_COUNT,
   DEFAULT_GENERATOR_IMAGE_MODEL,
   DEFAULT_GENERATOR_IMAGE_SIZE,
   GENERATED_IMAGE_ROLE,
@@ -337,12 +338,14 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
       selectedGeneratorTask.aspectRatio,
       selectedGeneratorTask.prompt,
       selectedGeneratorTask.imageModel,
-      selectedGeneratorTask.imageSize
+      selectedGeneratorTask.imageSize,
+      selectedGeneratorTask.imageCount
     )
   }, [generatorMeta, selectedGeneratorTask])
   const generatorAspectRatio = resolvedGeneratorMeta?.aspectRatio ?? DEFAULT_GENERATOR_ASPECT_RATIO
   const generatorImageModel = resolvedGeneratorMeta?.imageModel ?? DEFAULT_GENERATOR_IMAGE_MODEL
   const generatorImageSize = resolvedGeneratorMeta?.imageSize ?? DEFAULT_GENERATOR_IMAGE_SIZE
+  const generatorImageCount = resolvedGeneratorMeta?.imageCount ?? DEFAULT_GENERATOR_IMAGE_COUNT
   const activePresetDefinition = ACTION_PRESETS[activePreset]
   const composerSelectionDraft = useMemo(() => {
     if (dismissedSelectionKey === selectedShapeIdsKey) {
@@ -1727,6 +1730,19 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
     [generatorBusy, selectedGeneratorImage, updateGeneratorShapeMeta]
   )
 
+  const handleGeneratorCountChange = useCallback(
+    (imageCount: number) => {
+      if (!selectedGeneratorImage || generatorBusy) return
+
+      const safeImageCount = Number.isFinite(imageCount)
+        ? Math.max(1, Math.min(4, Math.round(imageCount)))
+        : DEFAULT_GENERATOR_IMAGE_COUNT
+      updateGeneratorShapeMeta(selectedGeneratorImage.id, { imageCount: safeImageCount })
+      setGeneratorError('')
+    },
+    [generatorBusy, selectedGeneratorImage, updateGeneratorShapeMeta]
+  )
+
   const ensureTaskTargetShape = useCallback(
     (taskId: string, task: GenerationTask) => {
       if (editor.getShape(task.targetShapeId)) {
@@ -1780,7 +1796,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
 
       const generatorMetaPatch =
         task.origin === 'image-generator-card'
-          ? createGeneratorMeta(task.aspectRatio, task.prompt, task.imageModel, task.imageSize)
+          ? createGeneratorMeta(
+              task.aspectRatio,
+              task.prompt,
+              task.imageModel,
+              task.imageSize,
+              task.imageCount
+            )
           : undefined
 
       updateTaskStatusPlaceholder(
@@ -2218,6 +2240,9 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         getGeneratorMeta(liveGeneratorShape) ?? createGeneratorMeta(DEFAULT_GENERATOR_ASPECT_RATIO)
       const nextWidth = Math.max(1, Math.round(liveGeneratorShape.props.w))
       const nextHeight = Math.max(1, Math.round(liveGeneratorShape.props.h))
+      const baseX = Math.round(liveGeneratorShape.x)
+      const baseY = Math.round(liveGeneratorShape.y)
+      const count = liveGeneratorMeta.imageCount
 
       persistGeneratorPrompt(liveGeneratorShape.id, promptText)
       updateTaskStatusPlaceholder(
@@ -2229,38 +2254,55 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           liveGeneratorMeta.aspectRatio,
           promptText,
           liveGeneratorMeta.imageModel,
-          liveGeneratorMeta.imageSize
+          liveGeneratorMeta.imageSize,
+          liveGeneratorMeta.imageCount
         )
       )
 
       const now = Date.now()
-      const task: GenerationTask = {
-        id: createTaskId(),
-        mode: 'image-generator',
-        origin: 'image-generator-card',
-        prompt: promptText,
-        aspectRatio: liveGeneratorMeta.aspectRatio,
-        imageModel: liveGeneratorMeta.imageModel,
-        imageSize: liveGeneratorMeta.imageSize,
-        status: 'queued',
-        width: nextWidth,
-        height: nextHeight,
-        insertX: Math.round(liveGeneratorShape.x),
-        insertY: Math.round(liveGeneratorShape.y),
-        targetShapeId: liveGeneratorShape.id,
-        sourceAction: 'text-to-image',
-        retries: 0,
-        createdAt: now,
-        updatedAt: now,
+      const nextTasks: GenerationTask[] = []
+
+      for (let i = 0; i < count; i += 1) {
+        const col = i % 2
+        const row = Math.floor(i / 2)
+        const insertX = baseX + col * (nextWidth + INSERT_GAP)
+        const insertY = baseY + row * (nextHeight + INSERT_GAP)
+        const isPrimary = i === 0
+
+        const targetShapeId = isPrimary
+          ? liveGeneratorShape.id
+          : createPlaceholderShape('Queued', nextWidth, nextHeight, insertX, insertY)
+
+        nextTasks.push({
+          id: createTaskId(),
+          mode: 'image-generator',
+          origin: isPrimary ? 'image-generator-card' : 'image-generator-batch',
+          prompt: promptText,
+          aspectRatio: liveGeneratorMeta.aspectRatio,
+          imageModel: liveGeneratorMeta.imageModel,
+          imageSize: liveGeneratorMeta.imageSize,
+          imageCount: liveGeneratorMeta.imageCount,
+          status: 'queued',
+          width: nextWidth,
+          height: nextHeight,
+          insertX,
+          insertY,
+          targetShapeId,
+          sourceAction: 'text-to-image',
+          retries: 0,
+          createdAt: now,
+          updatedAt: now,
+        })
       }
 
-      setTasks((prev) => [task, ...prev].slice(0, MAX_TASKS))
+      setTasks((prev) => [...nextTasks, ...prev].slice(0, MAX_TASKS))
       setGeneratorError('')
     } catch (error) {
       setGeneratorError(error instanceof Error ? error.message : '创建生成任务失败')
     }
   }, [
     assistantMode,
+    createPlaceholderShape,
     editor,
     generatorPrompt,
     persistGeneratorPrompt,
@@ -2448,7 +2490,8 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
                   current.aspectRatio,
                   current.prompt,
                   current.imageModel,
-                  current.imageSize
+                  current.imageSize,
+                  current.imageCount
                 )
               : undefined
           )
@@ -2502,7 +2545,13 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
           task.width,
           task.height,
           task.origin === 'image-generator-card'
-            ? createGeneratorMeta(task.aspectRatio, task.prompt, task.imageModel, task.imageSize)
+            ? createGeneratorMeta(
+                task.aspectRatio,
+                task.prompt,
+                task.imageModel,
+                task.imageSize,
+                task.imageCount
+              )
             : undefined
         )
       }
@@ -2888,6 +2937,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         generatorImageModel={generatorImageModel}
         generatorImageSize={generatorImageSize}
         generatorAspectRatio={generatorAspectRatio}
+        generatorImageCount={generatorImageCount}
         generatorError={generatorError}
         generatorStatusText={generatorStatusText}
         generatorTaskFailed={selectedGeneratorTask?.status === 'failed'}
@@ -2906,6 +2956,7 @@ export function CanvasWorkbench({ board, onBoardMetaChange }: CanvasWorkbenchPro
         onPromptKeyDown={handleGeneratorPromptKeyDown}
         onModelChange={handleGeneratorModelChange}
         onSizeChange={handleGeneratorSizeChange}
+        onCountChange={handleGeneratorCountChange}
         onAspectRatioChange={(ratio) => {
           if (selectedGeneratorImage) {
             resizeGeneratorCard(selectedGeneratorImage, ratio)

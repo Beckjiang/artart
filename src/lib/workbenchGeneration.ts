@@ -10,6 +10,7 @@ export type AssistantMode =
 export type GenerationTaskOrigin =
   | 'image-edit-sidebar'
   | 'image-generator-card'
+  | 'image-generator-batch'
   | 'selection-imagine-actionbar'
 
 export type WorkbenchSelectionSummary = {
@@ -223,4 +224,6 @@ export const getInsertPlacement = (
 }
 
 export const shouldRecreateTaskTarget = (origin: GenerationTaskOrigin) =>
-  origin === 'image-edit-sidebar' || origin === 'selection-imagine-actionbar'
+  origin === 'image-edit-sidebar' ||
+  origin === 'selection-imagine-actionbar' ||
+  origin === 'image-generator-batch'

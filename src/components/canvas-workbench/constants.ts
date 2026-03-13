@@ -22,6 +22,7 @@ export const {
   imageModel: DEFAULT_GENERATOR_IMAGE_MODEL,
   imageSize: DEFAULT_GENERATOR_IMAGE_SIZE,
 } = resolveGeminiImageDefaults(import.meta.env)
+export const DEFAULT_GENERATOR_IMAGE_COUNT = 1
 export const GENERATOR_ROLE = 'image-generator'
 export const GENERATOR_PLACEHOLDER_LABEL = 'Image Generator'
 export const GENERATED_IMAGE_ROLE = 'generated-image'

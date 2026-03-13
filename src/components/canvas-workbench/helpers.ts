@@ -3,6 +3,7 @@ import { IMAGE_ASPECT_RATIOS } from '../../lib/imageGeneration'
 import type { ImageAspectRatio, ImageGenerationSize, ImageGeneratorModel } from '../../lib/imageGeneration'
 import {
   DEFAULT_GENERATOR_ASPECT_RATIO,
+  DEFAULT_GENERATOR_IMAGE_COUNT,
   DEFAULT_GENERATOR_IMAGE_MODEL,
   DEFAULT_GENERATOR_IMAGE_SIZE,
   DEFAULT_SIDEBAR_WIDTH,
@@ -284,6 +285,17 @@ export const isGeneratorShape = (shape: TLImageShape | null | undefined): shape 
   return shape.meta?.canvasRole === GENERATOR_ROLE
 }
 
+const normalizeGeneratorImageCount = (value: unknown): number => {
+  const numeric =
+    typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_GENERATOR_IMAGE_COUNT
+  }
+
+  return Math.max(1, Math.min(4, Math.round(numeric)))
+}
+
 export const getGeneratorMeta = (shape: TLImageShape | null | undefined): GeneratorShapeMeta | null => {
   if (!isGeneratorShape(shape)) return null
 
@@ -306,6 +318,7 @@ export const getGeneratorMeta = (shape: TLImageShape | null | undefined): Genera
       typeof shape.meta?.imageSize === 'string'
         ? (shape.meta.imageSize as ImageGenerationSize)
         : DEFAULT_GENERATOR_IMAGE_SIZE,
+    imageCount: normalizeGeneratorImageCount(shape.meta?.imageCount),
   }
 }
 
@@ -313,13 +326,15 @@ export const createGeneratorMeta = (
   aspectRatio: ImageAspectRatio,
   lastPrompt = '',
   imageModel?: ImageGeneratorModel,
-  imageSize?: ImageGenerationSize
+  imageSize?: ImageGenerationSize,
+  imageCount?: number
 ): GeneratorShapeMeta => ({
   canvasRole: GENERATOR_ROLE,
   aspectRatio,
   lastPrompt,
   imageModel: imageModel ?? DEFAULT_GENERATOR_IMAGE_MODEL,
   imageSize: imageSize ?? DEFAULT_GENERATOR_IMAGE_SIZE,
+  imageCount: normalizeGeneratorImageCount(imageCount),
 })
 
 export const formatTaskStatus = (status: TaskStatus) => {
